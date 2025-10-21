@@ -6,6 +6,7 @@
 #include "devices/console.h"
 #include "devices/file.h"
 #include "devices/datetime.h"
+#include "devices/threads.h"
 
 /*
 Copyright (c) 2021-2025 Devine Lu Linvega, Andrew Alderwick
@@ -18,7 +19,8 @@ THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
 WITH REGARD TO THIS SOFTWARE.
 */
 
-Uxn uxn;
+__thread Uxn uxn;
+Uxn uxn_global;
 int console_vector;
 
 Uint8
@@ -35,11 +37,14 @@ void
 emu_deo(Uint8 addr, Uint8 value)
 {
 	uxn.dev[addr] = value;
+	/* fprintf(stderr,"emu_deo: wrote 0x%02x to address 0x%02x\n", value, addr); */
 	switch(addr & 0xf0) {
 	case 0x00: system_deo(addr); break;
 	case 0x10: console_deo(addr); break;
 	case 0xa0: file_deo(addr); break;
 	case 0xb0: file_deo(addr); break;
+	case 0xd0: fprintf(stderr,"emu_deo received: command 0x%02x\n", uxn.dev[0xd0]);threads_deo(addr); break;
+	default: fprintf(stderr,"emu_deo: unhandled address 0x%02x\n", addr); break;
 	}
 }
 

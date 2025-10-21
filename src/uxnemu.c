@@ -44,7 +44,8 @@ WITH REGARD TO THIS SOFTWARE.
 #define HEIGHT 40 * 8
 #define TIMEOUT_MS 334
 
-Uxn uxn;
+__thread Uxn uxn;
+Uxn uxn_global;
 int console_vector;
 
 static SDL_Window *emu_window;
