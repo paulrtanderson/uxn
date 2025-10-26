@@ -28,9 +28,10 @@
 
     #01                ( command = 1 )
     .Threads/cmd DEO   ( write create command byte device cmd port )
+
+    .Threads/outtid DEI ( read out thread id )
     
-    #00
-    .Threads/tid DEO   ( we need to join thread 0, will change to actual thread id later )
+    .Threads/tid DEO   ( join the thread number we just read )
 
     #02
     .Threads/cmd DEO   ( write join command to device cmd port )

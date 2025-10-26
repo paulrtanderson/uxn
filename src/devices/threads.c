@@ -52,7 +52,7 @@ enum { STATUS_IDLE = 0, STATUS_OK = 2, STATUS_ERROR = 3 };
 /* CMD meanings
  1 - 
 */
-enum { CMD_CREATE = 0x01, CMD_JOIN = 0x02 };
+enum { CMD_CREATE = 0x01, CMD_JOIN = 0x02, CMD_DETACH = 0x03 };
 
 typedef struct {
   pthread_t thread_handle;
@@ -141,7 +141,7 @@ static void *worker_thread_entry(void *args) {
 static void handle_create_command(void) {
   fprintf(stderr,"handle_create_command: started\n");
   Uint16 entry_address = device_get16(PORT_PTR_LO);
-  Uint8 thread_id = 0; /*find_first_free_thread_num();*/
+  Uint8 thread_id = find_first_free_thread_num();
   thread_records[thread_id].entry_address = entry_address;
   fprintf(stderr,"handle_create_command: creating thread_id=%d\n", thread_id);
   fprintf(stderr,"handle_create_command: entry_address=0x%04x\n", entry_address);
@@ -153,12 +153,11 @@ static void handle_create_command(void) {
 }
 
 /* when a JOIN command is received */
-static void handle_join_command(void) {
+static void handle_join_command(Uint16 thread_num) {
   fprintf(stderr,"handle_join_command: started\n");
-  Uint16 target_thread_id = 0;
-  ThreadRecord *record = get_thread_record(target_thread_id);
+  ThreadRecord *record = get_thread_record(thread_num);
 
-  fprintf(stderr,"handle_join_command: target_thread_id=%d\n", target_thread_id);
+  fprintf(stderr,"handle_join_command: thread_num=%d\n", thread_num);
   fprintf(stderr,"handle_join_command: joining ");
   print_thread_id(record->thread_handle);
   pthread_join(record->thread_handle, NULL);
@@ -211,7 +210,18 @@ void threads_deo(Uint8 address) {
     break;
   case CMD_JOIN:
     fprintf(stderr,"threads_deo: CMD_JOIN\n");
-    handle_join_command();
+    Uint16 target_thread_id = device_get16(PORT_TARGET_THREAD_LO);
+    handle_join_command(target_thread_id);
+    break;
+  case CMD_DETACH:
+    fprintf(stderr,"threads_deo: CMD_DETACH\n");
+    Uint16 detach_thread_id = device_get16(PORT_TARGET_THREAD_LO);
+    if (detach_thread(detach_thread_id)) {
+        uxn.dev[PORT_STATUS] = STATUS_OK;
+    } else {
+        uxn.dev[PORT_STATUS] = STATUS_ERROR;
+        uxn.dev[PORT_ERRNO] = EINVAL;
+    }
     break;
   default:
     uxn.dev[PORT_STATUS] = STATUS_ERROR;
