@@ -2,8 +2,16 @@
 
 |10 @Console &vector $2 &read $1 &pad $4 &type $1 &write $1 &error $1
 
-|d0 @Threads &cmd $1 &status $1 &ptr $2 &errno $1
-              &pad $3 &result $1 &pad2 $1 &outtid $2 &pad3 $4 &tid $2
+|d0 @Threads
+  &cmd       $1
+  &status    $1
+  &ptr       $2
+  &errno     $1
+  &pad       $3
+  &result    $2
+  &outtid    $2
+  &pad3      $2
+  &targettid $2
 
 |0100
 
@@ -28,17 +36,30 @@
 
     #01                ( command = 1 )
     .Threads/cmd DEO   ( write create command byte device cmd port )
+    .Threads/outtid DEI2 ( read out thread id )
 
-    .Threads/outtid DEI ( read out thread id )
+
+    ;worker2           ( push pointer of @worker2 label )
+    .Threads/ptr DEO2  ( store 16-bit address device ptr field )
+    #01                ( command = 1 )
+    .Threads/cmd DEO   ( write create command byte device cmd port )
+
+    .Threads/outtid DEI2 ( read out thread id )
     
-    .Threads/tid DEO   ( join the thread number we just read )
-
+    .Threads/targettid DEO2   ( join the thread number we just read )
     #02
     .Threads/cmd DEO   ( write join command to device cmd port )
 
     .Threads/result DEI2
 
-    .Console/write DEO2  ( write result to console )
+    ;pdec JSR2  ( write result to console )
+
+    .Threads/targettid DEO2   ( join the thread number we read earlier )
+    #02
+    .Threads/cmd DEO   ( write join command to device cmd port )
+
+    .Threads/result DEI2
+    ;pdec JSR2  ( write result to console )
 
     BRK
 
@@ -49,3 +70,24 @@
     .Threads/result DEO2  ( store result in device result field )
 
     BRK
+
+
+@worker2
+    #20                   ( Hex 20 = decimal 32 )
+    #0b                   ( Hex 0B = decimal 11 )
+    ADD                   ( should be 43 - which is '+''s ASCII code )
+    .Threads/result DEO2  ( store result in device result field )
+
+    BRK
+
+
+
+@pdec ( short* -- )
+    #000a SWP2 [ LITr ff ]
+    &>get ( -- )
+        SWP2k DIV2k MUL2 SUB2 STH
+        POP OVR2 DIV2 ORAk ?&>get
+    POP2 POP2
+    &>put ( -- )
+        STHr INCk ?{ POP JMP2r }
+        [ LIT "0 ] ADD .Console/error DEO !&>put

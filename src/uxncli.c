@@ -43,7 +43,7 @@ emu_deo(Uint8 addr, Uint8 value)
 	case 0x10: console_deo(addr); break;
 	case 0xa0: file_deo(addr); break;
 	case 0xb0: file_deo(addr); break;
-	case 0xd0: fprintf(stderr,"emu_deo received: command 0x%02x\n", uxn.dev[0xd0]);threads_deo(addr); break;
+	case 0xd0: threads_deo(addr); break;
 	default: fprintf(stderr,"emu_deo: unhandled address 0x%02x\n", addr); break;
 	}
 }
