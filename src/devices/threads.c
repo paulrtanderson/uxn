@@ -29,13 +29,13 @@
     Layout:
       d0    CMD             Command register
       d1    STATUS          0=idle 2=ok 3=error
-      d2–d3 PTR             Entry pointer (lo/hi)
+      d2–d3 PTR             Entry pointer (lo/hi) (address of first instruction to run in new thread)
       d4    ERRNO           Error code
       d5–d7 —               Reserved/padding
-      d8–d9 RESULT          16‑bit result
-      dA–dB OUT_THREAD      ID of the last created thread
+      d8–d9 RESULT          16‑bit result (could be used as pointer or value)
+      dA–dB OUT_THREAD      ID of the last created thread (maybe we should just reuse result?)
       dC–dD —               Reserved/padding
-      dE–dF TARGET_THREAD   ID of thread to join
+      dE–dF TARGET_THREAD   ID of thread to operate on
 */
 
 enum ThreadsPort {
