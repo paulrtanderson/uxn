@@ -37,7 +37,7 @@ Ports
 - R0: D8–D9 (read, 16-bit)
 
 
-## The Device does not mutate or interact with the Uxn stack directly; all stack interaction is done by the Uxntal wrappers.
+#### The Device does not mutate or interact with the Uxn stack directly; all stack interaction is done by the Uxntal wrappers.
 ---
 Command: CREATE (0x01)
 Device API
