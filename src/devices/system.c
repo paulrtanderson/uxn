@@ -59,7 +59,6 @@ system_boot(Uint8 *ram, char *rom_path, int has_args)
 	boot_path = rom_path;
 	uxn.dev[0x17] = has_args;
 	if(ram && system_load(uxn.ram + PAGE_PROGRAM, rom_path)) {
-		uxn_global = uxn;
 		return uxn_eval(PAGE_PROGRAM);
 	}
 	return 0;

@@ -45,7 +45,6 @@ WITH REGARD TO THIS SOFTWARE.
 #define TIMEOUT_MS 334
 
 __thread Uxn uxn;
-Uxn uxn_global;
 int console_vector;
 
 static SDL_Window *emu_window;

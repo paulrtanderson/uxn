@@ -10,7 +10,7 @@
 #include "threads.h"
 #include "system.h"
 
-#define LOGGING_ENABLED 0  /* Set to 0 to disable all logging */
+#define LOGGING_ENABLED 1  /* Set to 0 to disable all logging */
 
 #if LOGGING_ENABLED
 #define log_printf(...) fprintf(stderr, __VA_ARGS__)
@@ -44,25 +44,19 @@ enum ThreadsPort {
   THREAD_CMD               = 0xD0,
   THREAD_STATUS            = 0xD1,
 
-  THREAD_PTR_LO            = 0xD2,
-  THREAD_PTR_HI            = 0xD3,
+  ARG_0_LO            = 0xD2,
+  ARG_0_HI            = 0xD3,
 
-  THREAD_ERRNO             = 0xD4,
+  ARG_1_LO            = 0xD4,
+  ARG_1_HI            = 0xD5,
 
-  /* padding: 0xD5–0xD7 */
+  ARG_2_LO            = 0xD6,
+  ARG_2_HI            = 0xD7,
 
-  THREAD_RESULT_LO         = 0xD8,
-  THREAD_RESULT_HI         = 0xD9,
+  RETURN_LO           = 0xD8,
+  RETURN_HI           = 0xD9,
 
-  THREAD_OUT_THREAD_LO     = 0xDA,
-  THREAD_OUT_THREAD_HI     = 0xDB,
-
-  /* padding: 0xDC–0xDD */
-
-  THREAD_TARGET_THREAD_LO  = 0xDE,
-  THREAD_TARGET_THREAD_HI  = 0xDF,
-
-  THREAD_THREAD_END          = 0xDF
+  THREAD_ERRNO             = 0xDA,
 };
 
 enum { STATUS_IDLE = 0, STATUS_OK = 2, STATUS_ERROR = 3 };
@@ -128,21 +122,34 @@ static ThreadRecord *get_thread_record(Uint16 thread_id) {
   return &thread_records[thread_id];
 }
 
+typedef struct {
+  Uxn uxn_snapshot;
+  ThreadRecord *thread_record;
+} WorkerThreadArgs;
+
 /* Thread starts evaluating uxn code here */
-static void *worker_thread_entry(void *args) {
-  Uint8 thread_num = (Uint8)(uintptr_t)args;
-  ThreadRecord* record = &thread_records[thread_num];
+static void *worker_thread_entry(void *p_worker_thread_args) {
+  WorkerThreadArgs* args = (WorkerThreadArgs*)p_worker_thread_args;
+
+  ThreadRecord *record = args->thread_record;
+  Uint8 thread_num = record - thread_records;
+
+  /* copy the snapshot of the parent uxn state to thread local Uxn state 
+  This is only necessary because Varvara makes use of the global uxn state
+  */
+  uxn = args->uxn_snapshot; 
+  free(args); /* we don't need this anymore */
+
+
   log_printf("worker_thread_entry: thread_num=%d\n", thread_num);
-  log_printf("worker_thread_entry: started\n");
   log_printf("worker_thread_entry: entry_address=0x%04x\n", record->entry_address);
-  uxn = uxn_global; /* copy global uxn state to thread-local uxn state */
   log_printf("uxn ram ptr: %p\n", uxn.ram);
   uxn_eval(record->entry_address);
 
   /*log_printf("worker_thread_entry: top of stack: %d\n", uxn.wst.dat[uxn.wst.ptr - 1]);*/
 
   log_printf("worker_thread_entry: finished\n");
-  Uint16 result = device_get16(THREAD_RESULT_LO);
+  Uint16 result = device_get16(RETURN_LO);
   record->result_value = result;
 
   log_printf("worker_thread_entry: result_value=0x%04x\n", result);
@@ -161,19 +168,36 @@ static void *worker_thread_entry(void *args) {
   return NULL;
 }
 
+
+
 /* when a CREATE command is received */
-static void handle_create_command(void) {
-  log_printf("handle_create_command: started\n");
-  Uint16 entry_address = device_get16(THREAD_PTR_LO);
+static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr, Uint8 flags) {
   Uint8 thread_id = find_first_free_thread_num();
   thread_records[thread_id].entry_address = entry_address;
-  log_printf("handle_create_command: creating thread_id=%d\n", thread_id);
-  log_printf("handle_create_command: entry_address=0x%04x\n", entry_address);
-  pthread_create(&thread_records[thread_id].thread_handle, NULL,
-               worker_thread_entry, (void *)(uintptr_t)thread_id);
-  log_printf("handle_create_command: created ");
+
+  WorkerThreadArgs *args = malloc(sizeof(WorkerThreadArgs));
+  args->uxn_snapshot = uxn; /* copy current thread's Uxn state */
+  args->thread_record = &thread_records[thread_id];
+
+
+  pthread_attr_t attr;
+  pthread_attr_t *attr_ptr = NULL;
+  thread_records[thread_id].is_detached = false;
+
+  /* only flag is detach for now */
+  if (flags == 1) {
+    attr_ptr = &attr;
+    pthread_attr_init(attr_ptr);
+    pthread_attr_setdetachstate(attr_ptr, PTHREAD_CREATE_DETACHED);
+
+    thread_records[thread_id].is_detached = true; 
+  }
+
+  pthread_create(&thread_records[thread_id].thread_handle, attr_ptr,
+               worker_thread_entry, (void *)args);
+  log_printf("handle_create_command: created thread_id=%d\n", thread_id);
   print_thread_id(thread_records[thread_id].thread_handle);
-  device_set16(THREAD_OUT_THREAD_LO, thread_id);
+  device_set16(RETURN_LO, thread_id);
 }
 
 /* when a JOIN command is received */
@@ -188,7 +212,7 @@ static void handle_join_command(Uint16 thread_num) {
   record->is_detached = false;
   record->is_finished = false;
 
-  device_set16(THREAD_RESULT_LO, record->result_value);
+  device_set16(RETURN_LO, record->result_value);
 
 
   log_printf("handle_join_command: joined with return value=0x%04x\n", record->result_value);
@@ -221,22 +245,28 @@ unlock:
 
 /* Device write entry */
 void threads_deo(Uint8 address) {
-  if ((address & 0xf0) != 0xd0) return; /* bitwise AND to check high nibble is in the thread device range */
-  if ((address & 0x0f) != 0x00) return; /* bitwise AND to check low nibble is 0x0 (only THREAD_CMD is writable) */
+  if ((address & 0xf0) != THREAD_CMD) return; /* bitwise AND to check high nibble is in the thread device range */
+  if ((address & 0x0f) != 0x00) return; /* bitwise AND to check low nibble is 0x0 (only THREAD_CMD has writable side affects) */
+
+  
 
   switch (uxn.dev[THREAD_CMD]) {
   case CMD_CREATE:
     log_printf("threads_deo: CMD_CREATE\n");
-    handle_create_command();
+    Uint16 entry_address = device_get16(ARG_0_LO);
+    Uint16 arg_ptr = device_get16(ARG_1_LO);
+    Uint8 flag = uxn.dev[ARG_2_LO];
+    log_printf("with args <entry_address=0x%04x, arg_ptr=0x%04x, flags=0x%02x>\n", entry_address, arg_ptr, flag);
+    handle_create_command(entry_address, arg_ptr, flag);
     break;
   case CMD_JOIN:
     log_printf("threads_deo: CMD_JOIN\n");
-    Uint16 target_thread_id = device_get16(THREAD_TARGET_THREAD_LO);
+    Uint16 target_thread_id = device_get16(ARG_0_LO);
     handle_join_command(target_thread_id);
     break;
   case CMD_DETACH:
     log_printf("threads_deo: CMD_DETACH\n");
-    Uint16 detach_thread_id = device_get16(THREAD_TARGET_THREAD_LO);
+    Uint16 detach_thread_id = device_get16(ARG_0_LO);
     if (detach_thread(detach_thread_id)) {
         uxn.dev[THREAD_STATUS] = STATUS_OK;
     } else {

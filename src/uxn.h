@@ -38,6 +38,5 @@ typedef struct Uxn {
 extern Uint8 emu_dei(Uint8 addr);
 extern void emu_deo( Uint8 addr, Uint8 value);
 extern __thread Uxn uxn;
-extern Uxn uxn_global;
 
 int uxn_eval(Uint16 pc);

@@ -20,7 +20,6 @@ WITH REGARD TO THIS SOFTWARE.
 */
 
 __thread Uxn uxn;
-Uxn uxn_global;
 int console_vector;
 
 Uint8
