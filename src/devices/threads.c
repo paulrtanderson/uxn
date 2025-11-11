@@ -139,7 +139,7 @@ static void *worker_thread_entry(void *p_worker_thread_args) {
 
   /* copy ram pointer from global variable to TLS */
   uxn.ram = shared_ram_ptr;
-  
+
   log_printf("worker_thread_entry: thread_num=%d\n", thread_num);
   log_printf("worker_thread_entry: entry_address=0x%04x\n", p_record->entry_address);
   log_printf("uxn ram ptr: %p\n", uxn.ram);
@@ -225,7 +225,7 @@ bool detach_thread(int i) {
         goto unlock;
 
     record->is_detached = true;
-    pthread_detach(record->thread_id);
+    pthread_detach(record->thread_handle);
 
     if (record->is_finished) {
         record->is_in_use = false;
