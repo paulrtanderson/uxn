@@ -71,17 +71,19 @@ enum { CMD_CREATE = 0x01, CMD_JOIN = 0x02, CMD_DETACH = 0x03 };
 
 typedef struct {
   pthread_t thread_handle;
+  pthread_t thread_id;
+  pthread_mutex_t thread_mutex;
+  Uint8 *shared_ram_ptr;
   Uint16 entry_address;
   Uint16 result_value;
-  pthread_t thread_id;
   bool is_in_use;
   bool is_detached;
   bool is_finished;
-  pthread_mutex_t thread_mutex;
 } ThreadRecord;
 
 #define MAX_THREAD_COUNT 8
 static ThreadRecord thread_records[MAX_THREAD_COUNT];
+
 pthread_mutex_t thread_record_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void print_thread_id(pthread_t th) {
@@ -122,49 +124,39 @@ static ThreadRecord *get_thread_record(Uint16 thread_id) {
   return &thread_records[thread_id];
 }
 
-typedef struct {
-  Uxn uxn_snapshot;
-  ThreadRecord *thread_record;
-} WorkerThreadArgs;
-
 /* Thread starts evaluating uxn code here */
 static void *worker_thread_entry(void *p_worker_thread_args) {
-  WorkerThreadArgs* args = (WorkerThreadArgs*)p_worker_thread_args;
+  ThreadRecord *p_record = (ThreadRecord *)p_worker_thread_args;
+  Uint8 thread_num = p_record - thread_records;
 
-  ThreadRecord *record = args->thread_record;
-  Uint8 thread_num = record - thread_records;
-
-  /* copy the snapshot of the parent uxn state to thread local Uxn state 
-  This is only necessary because Varvara makes use of the global uxn state
-  */
-  uxn = args->uxn_snapshot; 
-  free(args); /* we don't need this anymore */
+  /* copy ram pointer from main uxn instance */
+  uxn.ram = p_record->shared_ram_ptr;
 
 
   log_printf("worker_thread_entry: thread_num=%d\n", thread_num);
-  log_printf("worker_thread_entry: entry_address=0x%04x\n", record->entry_address);
+  log_printf("worker_thread_entry: entry_address=0x%04x\n", p_record->entry_address);
   log_printf("uxn ram ptr: %p\n", uxn.ram);
-  uxn_eval(record->entry_address);
+  uxn_eval(p_record->entry_address);
 
   /*log_printf("worker_thread_entry: top of stack: %d\n", uxn.wst.dat[uxn.wst.ptr - 1]);*/
 
   log_printf("worker_thread_entry: finished\n");
   Uint16 result = device_get16(RETURN_LO);
-  record->result_value = result;
+  p_record->result_value = result;
 
   log_printf("worker_thread_entry: result_value=0x%04x\n", result);
 
-  pthread_mutex_lock(&record->thread_mutex);
-  record->is_finished = true;
+  pthread_mutex_lock(&p_record->thread_mutex);
+  p_record->is_finished = true;
 
-  if (record->is_detached) {
+  if (p_record->is_detached) {
       /* We are detached: free the slot for reuse */
-      record->is_in_use = false;
-      record->is_detached = false;
-      record->is_finished = false;
+      p_record->is_in_use = false;
+      p_record->is_detached = false;
+      p_record->is_finished = false;
   }
 
-  pthread_mutex_unlock(&record->thread_mutex);
+  pthread_mutex_unlock(&p_record->thread_mutex);
   return NULL;
 }
 
@@ -174,11 +166,7 @@ static void *worker_thread_entry(void *p_worker_thread_args) {
 static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr, Uint8 flags) {
   Uint8 thread_id = find_first_free_thread_num();
   thread_records[thread_id].entry_address = entry_address;
-
-  WorkerThreadArgs *args = malloc(sizeof(WorkerThreadArgs));
-  args->uxn_snapshot = uxn; /* copy current thread's Uxn state */
-  args->thread_record = &thread_records[thread_id];
-
+  thread_records[thread_id].shared_ram_ptr = uxn.ram;
 
   pthread_attr_t attr;
   pthread_attr_t *attr_ptr = NULL;
@@ -194,7 +182,7 @@ static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr, Uint8 fl
   }
 
   pthread_create(&thread_records[thread_id].thread_handle, attr_ptr,
-               worker_thread_entry, (void *)args);
+               worker_thread_entry, (void *)&thread_records[thread_id]);
   log_printf("handle_create_command: created thread_id=%d\n", thread_id);
   print_thread_id(thread_records[thread_id].thread_handle);
   device_set16(RETURN_LO, thread_id);
