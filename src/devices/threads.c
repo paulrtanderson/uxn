@@ -134,9 +134,12 @@ static void *worker_thread_entry(void *p_worker_thread_args) {
   /* copy ram pointer from global variable to TLS */
   uxn.ram = shared_ram_ptr;
 
+  device_set16(RETURN_LO, p_record->arg_1); /* set arg1 as ram pointer to arg data */
+
   log_printf("worker_thread_entry: thread_num=%d\n", (int)(p_record - thread_records));
   log_printf("worker_thread_entry: entry_address=0x%04x\n", p_record->arg_0);
   log_printf("uxn ram ptr: %p\n", uxn.ram);
+  
   uxn_eval(p_record->arg_0);
 
   /*log_printf("worker_thread_entry: top of stack: %d\n", uxn.wst.dat[uxn.wst.ptr - 1]);*/
