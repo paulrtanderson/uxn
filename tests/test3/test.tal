@@ -1,0 +1,68 @@
+( Create and join three threads in sequence: expect "112233" )
+
+|10 @Console &vector $2 &read $1 &pad $4 &type $1 &write $1 &error $1
+
+|d0 @Threads
+  &cmd      $1
+  &status   $1
+  &a0       $2
+  &a1       $2
+  &a2       $2
+  &r0       $2
+  &errno    $1
+
+|0100
+
+  ;worker1            ( returns 11 )
+  .Threads/a0 DEO2
+  #01 .Threads/cmd DEO
+  .Threads/r0 DEI2
+  .Threads/a0 DEO2    ( join immediately )
+  #02 .Threads/cmd DEO
+  .Threads/r0 DEI2
+  ;pdec JSR2
+
+  ;worker2            ( returns 22 )
+  .Threads/a0 DEO2
+  #01 .Threads/cmd DEO
+  .Threads/r0 DEI2
+  .Threads/a0 DEO2
+  #02 .Threads/cmd DEO
+  .Threads/r0 DEI2
+  ;pdec JSR2
+
+  ;worker3            ( returns 33 )
+  .Threads/a0 DEO2
+  #01 .Threads/cmd DEO
+  .Threads/r0 DEI2
+  .Threads/a0 DEO2
+  #02 .Threads/cmd DEO
+  .Threads/r0 DEI2
+  ;pdec JSR2
+
+  BRK
+
+@worker1
+  #0005 #0006 ADD2      ( 5 + 6 = 11 )
+  .Threads/r0 DEO2
+  BRK
+
+@worker2
+  #0009 #000d ADD2      ( 9 + 13 = 22 )
+  .Threads/r0 DEO2
+  BRK
+
+@worker3
+  #0010 #0011 ADD2      ( 16 + 17 = 33 )
+  .Threads/r0 DEO2
+  BRK
+
+@pdec ( short* -- )
+  #000a SWP2 [ LITr ff ]
+  &>get
+    SWP2k DIV2k MUL2 SUB2 STH
+    POP OVR2 DIV2 ORAk ?&>get
+  POP2 POP2
+  &>put
+    STHr INCk ?{ POP JMP2r }
+    [ LIT "0 ] ADD .Console/error DEO !&>put

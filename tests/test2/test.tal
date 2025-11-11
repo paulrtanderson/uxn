@@ -1,0 +1,56 @@
+( Interleaved create/join: expect "799" )
+
+|10 @Console &vector $2 &read $1 &pad $4 &type $1 &write $1 &error $1
+
+|d0 @Threads
+  &cmd      $1
+  &status   $1
+  &a0       $2
+  &a1       $2
+  &a2       $2
+  &r0       $2
+  &errno    $1
+
+|0100
+
+  ;workerA            ( create first thread )
+  .Threads/a0 DEO2
+  #01 .Threads/cmd DEO
+  .Threads/r0 DEI2    ( thread id available if needed )
+
+  .Threads/a0 DEO2    ( join it immediately )
+  #02 .Threads/cmd DEO
+  .Threads/r0 DEI2    ( result = 7 )
+  ;pdec JSR2
+
+  ;workerB            ( create second thread )
+  .Threads/a0 DEO2
+  #01 .Threads/cmd DEO
+  .Threads/r0 DEI2
+
+  .Threads/a0 DEO2    ( join it immediately )
+  #02 .Threads/cmd DEO
+  .Threads/r0 DEI2    ( result = 99 )
+  ;pdec JSR2
+
+  BRK
+
+@workerA
+  #0003 #0004 ADD2      ( 3 + 4 = 7 )
+  .Threads/r0 DEO2
+  BRK
+
+@workerB
+  #003c #0027 ADD2      ( 60 + 39 = 99 )
+  .Threads/r0 DEO2
+  BRK
+
+@pdec ( short* -- )
+  #000a SWP2 [ LITr ff ]
+  &>get
+    SWP2k DIV2k MUL2 SUB2 STH
+    POP OVR2 DIV2 ORAk ?&>get
+  POP2 POP2
+  &>put
+    STHr INCk ?{ POP JMP2r }
+    [ LIT "0 ] ADD .Console/error DEO !&>put
