@@ -69,9 +69,7 @@ enum { CMD_CREATE = 0x01, CMD_JOIN = 0x02, CMD_DETACH = 0x03 };
 
 typedef struct {
   pthread_t thread_handle;
-  pthread_t thread_id;
   pthread_mutex_t thread_mutex;
-  Uint8 *shared_ram_ptr;
   Uint16 entry_address;
   Uint16 result_value;
   bool is_in_use;
@@ -82,6 +80,8 @@ typedef struct {
 #define MAX_THREAD_COUNT 8
 static ThreadRecord thread_records[MAX_THREAD_COUNT];
 
+Uint8 *shared_ram_ptr;
+
 static void print_thread_id(pthread_t th) {
   log_printf("thread_handle=%lu\n", (unsigned long)th);
 }
@@ -90,7 +90,8 @@ static bool mutex_init_done = false;
 
 static void initialize_mutexes() {
   if (!mutex_init_done) {
-    for (int i = 0; i < MAX_THREAD_COUNT; i++) {
+    int i;
+    for (i = 0; i < MAX_THREAD_COUNT; i++) {
       pthread_mutex_init(&thread_records[i].thread_mutex, NULL);
     }
     mutex_init_done = true;
@@ -136,10 +137,9 @@ static void *worker_thread_entry(void *p_worker_thread_args) {
   ThreadRecord *p_record = (ThreadRecord *)p_worker_thread_args;
   Uint8 thread_num = p_record - thread_records;
 
-  /* copy ram pointer from main uxn instance */
-  uxn.ram = p_record->shared_ram_ptr;
-
-
+  /* copy ram pointer from global variable to TLS */
+  uxn.ram = shared_ram_ptr;
+  
   log_printf("worker_thread_entry: thread_num=%d\n", thread_num);
   log_printf("worker_thread_entry: entry_address=0x%04x\n", p_record->entry_address);
   log_printf("uxn ram ptr: %p\n", uxn.ram);
@@ -173,7 +173,9 @@ static void *worker_thread_entry(void *p_worker_thread_args) {
 static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr, Uint8 flags) {
   Uint8 thread_id = find_first_free_thread_num();
   thread_records[thread_id].entry_address = entry_address;
-  thread_records[thread_id].shared_ram_ptr = uxn.ram;
+
+  /* copy ram pointer from TLS to global variable */
+  shared_ram_ptr = uxn.ram;
 
   pthread_attr_t attr;
   pthread_attr_t *attr_ptr = NULL;
