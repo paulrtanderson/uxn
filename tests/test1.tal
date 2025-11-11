@@ -1,0 +1,77 @@
+( usage: uxncli console.write.rom )
+
+|10 @Console &vector $2 &read $1 &pad $4 &type $1 &write $1 &error $1
+
+|d0 @Threads
+  &cmd      $1
+  &status   $1
+  &a0       $2
+  &a1       $2
+  &a2       $2
+  &r0       $2
+  &errno    $1
+
+|0100
+
+@on-reset ( -> )
+    ;worker            ( push pointer of @worker label )
+    .Threads/a0 DEO2  ( store 16-bit address device ptr field )
+
+    #01                ( command = 1 )
+    .Threads/cmd DEO   ( write create command byte device cmd port )
+    .Threads/r0 DEI2 ( read out thread id )
+
+
+    ;worker2           ( push pointer of @worker2 label )
+    .Threads/a0 DEO2  ( store 16-bit address device ptr field )
+    #01                ( command = 1 )
+    .Threads/cmd DEO   ( write create command byte device cmd port )
+
+    .Threads/r0 DEI2 ( read out thread id )
+
+    .Threads/a0 DEO2   ( join the thread number we just read )
+    #02
+    .Threads/cmd DEO   ( write join command to device cmd port )
+
+    .Threads/r0 DEI2
+
+    ;pdec JSR2  ( write result to console )
+
+    .Threads/a0 DEO2   ( join the thread number we read earlier )
+    #02
+    .Threads/cmd DEO   ( write join command to device cmd port )
+
+    .Threads/r0 DEI2
+    ;pdec JSR2  ( write result to console )
+
+    BRK
+
+@worker
+    #0006 
+    #0007
+    MUL2
+    .Threads/r0 DEO2  ( store result in device result field )
+
+    BRK
+
+
+@worker2
+    #0020                   ( Hex 20 = decimal 32 )
+    #000b                   ( Hex 0B = decimal 11 )
+    ADD2                   ( should be 43 - which is '+''s ASCII code )
+    .Threads/r0 DEO2  ( store result in device result field )
+
+    BRK
+
+
+
+@pdec ( short* -- )
+    #000a SWP2 [ LITr ff ]
+    &>get ( -- )
+        SWP2k DIV2k MUL2 SUB2 STH
+        POP OVR2 DIV2 ORAk ?&>get
+    POP2 POP2
+    &>put ( -- )
+        STHr INCk ?{ POP JMP2r }
+        [ LIT "0 ] ADD .Console/error DEO !&>put
+
