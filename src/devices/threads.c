@@ -135,12 +135,11 @@ static ThreadRecord *get_thread_record(Uint16 thread_id) {
 /* Thread starts evaluating uxn code here */
 static void *worker_thread_entry(void *p_worker_thread_args) {
   ThreadRecord *p_record = (ThreadRecord *)p_worker_thread_args;
-  Uint8 thread_num = p_record - thread_records;
 
   /* copy ram pointer from global variable to TLS */
   uxn.ram = shared_ram_ptr;
 
-  log_printf("worker_thread_entry: thread_num=%d\n", thread_num);
+  log_printf("worker_thread_entry: thread_num=%d\n", (int)(p_record - thread_records));
   log_printf("worker_thread_entry: entry_address=0x%04x\n", p_record->entry_address);
   log_printf("uxn ram ptr: %p\n", uxn.ram);
   uxn_eval(p_record->entry_address);
