@@ -61,5 +61,6 @@ main(int argc, char **argv)
 		console_arguments(i, argc, argv);
 		while(!uxn.dev[0x0f] && console_input(fgetc(stdin), 0x1));
 	}
+	destroy_mutexes();
 	return uxn.dev[0x0f] & 0x7f;
 }

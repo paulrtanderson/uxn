@@ -93,6 +93,16 @@ static void initialize_mutexes() {
   }
 }
 
+void destroy_mutexes() {
+  if (mutex_init_done) {
+    int i;
+    for (i = 0; i < MAX_THREAD_COUNT; i++) {
+      pthread_mutex_destroy(&thread_records[i].thread_mutex);
+    }
+    mutex_init_done = false;
+  }
+}
+
 /* built in macro helpers */
 /* read 16 bits from thread memory starting at low_address */
 static Uint16 device_get16(Uint16 low_address) {
@@ -139,7 +149,7 @@ static void *worker_thread_entry(void *p_worker_thread_args) {
   log_printf("worker_thread_entry: thread_num=%d\n", (int)(p_record - thread_records));
   log_printf("worker_thread_entry: entry_address=0x%04x\n", p_record->arg_0);
   log_printf("uxn ram ptr: %p\n", uxn.ram);
-  
+
   uxn_eval(p_record->arg_0);
 
   /*log_printf("worker_thread_entry: top of stack: %d\n", uxn.wst.dat[uxn.wst.ptr - 1]);*/
