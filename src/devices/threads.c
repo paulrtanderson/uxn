@@ -16,24 +16,17 @@
 #define log_printf(...) ((void)0)
 #endif
 
-/* CMD
-
-*/
-
 
 /*  Device: Threads
     Memory map: 0xd0–0xdf (16 bytes total)
-
     Layout:
-      d0    CMD             Command register
-      d1    STATUS          0=idle 2=ok 3=error
-      d2–d3 PTR             Entry pointer (lo/hi) (address of first instruction to run in new thread)
-      d4    ERRNO           Error code
-      d5–d7 —               Reserved/padding
-      d8–d9 RESULT          16‑bit result (could be used as pointer or value)
-      dA–dB OUT_THREAD      ID of the last created thread (maybe we should just reuse result?)
-      dC–dD —               Reserved/padding
-      dE–dF TARGET_THREAD   ID of thread to operate on
+    0xD0:       CMD (write-only)
+    0xD1:       STATUS (read-only)
+    0xD2-0xD3:  ARG_0 (16 bits)
+    0xD4-0xD5:  ARG_1 (16 bits)
+    0xD6-0xD7:  ARG_2 (16 bits)
+    0xD8-0xD9:  RETURN (16 bits) (read-only)
+    0xDA:       ERRNO (read-only)
 */
 
 enum ThreadsPort {
