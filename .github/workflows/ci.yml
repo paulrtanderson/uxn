@@ -29,7 +29,8 @@ jobs:
 
       - name: Run tests if present
         run: |
-          if [ -x tests/run.sh ]; then
+          if [ -f tests/run.sh ]; then
+            chmod +x tests/run.sh
             ./tests/run.sh
           else
             echo "No tests/run.sh, skipping."
