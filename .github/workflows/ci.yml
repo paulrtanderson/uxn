@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev
+
+      - name: Build
+        run: |
+          chmod +x build.sh
+          ./build.sh --no-run
+
+      - name: Smoke test binaries
+        run: |
+          bin/uxnasm -v
+          bin/uxncli -v
+          bin/uxnemu -v
+
+      - name: Run tests if present
+        run: |
+          if [ -x tests/run.sh ]; then
+            ./tests/run.sh
+          else
+            echo "No tests/run.sh, skipping."
+          fi
