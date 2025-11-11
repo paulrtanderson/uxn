@@ -80,6 +80,10 @@ else
 	CFLAGS="${CFLAGS} -DNDEBUG -O2 -g0 -s"
 fi
 
+# Allow logging control via env or CI
+LOGGING_ENABLED_FLAG=${LOGGING_ENABLED_FLAG:-0}
+CFLAGS="${CFLAGS} -DLOGGING_ENABLED=${LOGGING_ENABLED_FLAG}"
+
 ${CC} ${CFLAGS} src/uxnasm.c -o bin/uxnasm
 ${CC} ${CFLAGS} src/uxn.c src/devices/system.c src/devices/console.c src/devices/file.c src/devices/datetime.c src/devices/mouse.c src/devices/controller.c src/devices/screen.c src/devices/audio.c src/uxnemu.c ${UXNEMU_LDFLAGS} ${FILE_LDFLAGS} -o bin/uxnemu
 ${CC} ${CFLAGS} src/uxn.c src/devices/system.c src/devices/console.c src/devices/file.c src/devices/datetime.c src/devices/threads.c src/uxncli.c ${FILE_LDFLAGS} -pthread -o bin/uxncli

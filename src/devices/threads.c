@@ -10,8 +10,6 @@
 #include "threads.h"
 #include "system.h"
 
-#define LOGGING_ENABLED 1  /* Set to 0 to disable all logging */
-
 #if LOGGING_ENABLED
 #define log_printf(...) fprintf(stderr, __VA_ARGS__)
 #else
@@ -84,10 +82,19 @@ typedef struct {
 #define MAX_THREAD_COUNT 8
 static ThreadRecord thread_records[MAX_THREAD_COUNT];
 
-pthread_mutex_t thread_record_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 static void print_thread_id(pthread_t th) {
   log_printf("thread_handle=%lu\n", (unsigned long)th);
+}
+
+static bool mutex_init_done = false;
+
+static void initialize_mutexes() {
+  if (!mutex_init_done) {
+    for (int i = 0; i < MAX_THREAD_COUNT; i++) {
+      pthread_mutex_init(&thread_records[i].thread_mutex, NULL);
+    }
+    mutex_init_done = true;
+  }
 }
 
 /* built in macro helpers */
@@ -236,7 +243,7 @@ void threads_deo(Uint8 address) {
   if ((address & 0xf0) != THREAD_CMD) return; /* bitwise AND to check high nibble is in the thread device range */
   if ((address & 0x0f) != 0x00) return; /* bitwise AND to check low nibble is 0x0 (only THREAD_CMD has writable side affects) */
 
-  
+  initialize_mutexes();
 
   switch (uxn.dev[THREAD_CMD]) {
   case CMD_CREATE:
