@@ -63,7 +63,9 @@ enum { CMD_CREATE = 0x01, CMD_JOIN = 0x02, CMD_DETACH = 0x03 };
 typedef struct {
   pthread_t thread_handle;
   pthread_mutex_t thread_mutex;
-  Uint16 entry_address;
+  Uint16 arg_0;
+  Uint16 arg_1;
+  Uint16 arg_2;
   Uint16 result_value;
   bool is_in_use;
   bool is_detached;
@@ -133,9 +135,9 @@ static void *worker_thread_entry(void *p_worker_thread_args) {
   uxn.ram = shared_ram_ptr;
 
   log_printf("worker_thread_entry: thread_num=%d\n", (int)(p_record - thread_records));
-  log_printf("worker_thread_entry: entry_address=0x%04x\n", p_record->entry_address);
+  log_printf("worker_thread_entry: entry_address=0x%04x\n", p_record->arg_0);
   log_printf("uxn ram ptr: %p\n", uxn.ram);
-  uxn_eval(p_record->entry_address);
+  uxn_eval(p_record->arg_0);
 
   /*log_printf("worker_thread_entry: top of stack: %d\n", uxn.wst.dat[uxn.wst.ptr - 1]);*/
 
@@ -164,7 +166,12 @@ static void *worker_thread_entry(void *p_worker_thread_args) {
 /* when a CREATE command is received */
 static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr, Uint8 flags) {
   Uint8 thread_id = find_first_free_thread_num();
-  thread_records[thread_id].entry_address = entry_address;
+
+  thread_records[thread_id].arg_0 = entry_address;
+  thread_records[thread_id].arg_1 = arg_ptr;
+  thread_records[thread_id].arg_2 = flags;
+  thread_records[thread_id].result_value = 0;
+
 
   /* copy ram pointer from TLS to global variable */
   shared_ram_ptr = uxn.ram;
@@ -185,7 +192,7 @@ static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr, Uint8 fl
   pthread_create(&thread_records[thread_id].thread_handle, attr_ptr,
                worker_thread_entry, (void *)&thread_records[thread_id]);
   if (attr_ptr) pthread_attr_destroy(attr_ptr);
-  
+
   log_printf("handle_create_command: created thread_id=%d\n", thread_id);
   print_thread_id(thread_records[thread_id].thread_handle);
   device_set16(RETURN_LO, thread_id);
