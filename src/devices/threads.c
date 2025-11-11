@@ -184,6 +184,8 @@ static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr, Uint8 fl
 
   pthread_create(&thread_records[thread_id].thread_handle, attr_ptr,
                worker_thread_entry, (void *)&thread_records[thread_id]);
+  if (attr_ptr) pthread_attr_destroy(attr_ptr);
+  
   log_printf("handle_create_command: created thread_id=%d\n", thread_id);
   print_thread_id(thread_records[thread_id].thread_handle);
   device_set16(RETURN_LO, thread_id);
