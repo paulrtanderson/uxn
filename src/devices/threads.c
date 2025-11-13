@@ -73,9 +73,6 @@ typedef enum {
     MutexInit_PermissionDenied,
 } MutexInitError;
 
-
-// etc. for MutexLock, CondWait, etc.
-
 enum { STATUS_IDLE = 0, STATUS_OK = 2, STATUS_ERROR = 3 };
 
 
