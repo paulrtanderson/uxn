@@ -21,12 +21,12 @@
     Memory map: 0xd0–0xdf (16 bytes total)
     Layout:
     0xD0:       CMD (write-only)
-    0xD1:       STATUS (read-only)
+    0xD1:       ERRNO (read-only)
     0xD2-0xD3:  ARG_0 (16 bits)
     0xD4-0xD5:  ARG_1 (16 bits)
     0xD6-0xD7:  ARG_2 (16 bits)
     0xD8-0xD9:  RETURN (16 bits) (read-only)
-    0xDA:       ERRNO (read-only)
+    0xDA:       THREAD_USELOCALSTORAGEINDEX
 */
 
 enum ThreadsPort {
@@ -35,7 +35,7 @@ enum ThreadsPort {
   THREAD_CMD               = 0xD0,
   THREAD_STATUS            = 0xD1,
 
-  ARG_0_LO            = 0xD2,
+  ARG_0_LO                  = 0xD2,
   ARG_0_HI            = 0xD3,
 
   ARG_1_LO            = 0xD4,
@@ -47,8 +47,34 @@ enum ThreadsPort {
   RETURN_LO           = 0xD8,
   RETURN_HI           = 0xD9,
 
-  THREAD_ERRNO             = 0xDA,
+  THREAD_USELOCALSTORAGEINDEX             = 0xDA,
 };
+
+typedef enum {
+    ThreadCreate_OK = 0,
+    ThreadCreate_SystemResources,
+    ThreadCreate_InvalidAttributes,
+    ThreadCreate_PermissionDenied,
+    ThreadCreate_ATTR_INIT_OUT_OF_MEMORY,
+    ThreadCreate_ThreadLimitReached,
+} ThreadCreateError;
+
+typedef enum {
+    ThreadJoin_OK = 0,
+    ThreadJoin_Deadlock,
+    ThreadJoin_NotJoinable,
+    ThreadJoin_NotFound,
+} ThreadJoinError;
+
+typedef enum {
+    MutexInit_OK = 0,
+    MutexInit_InvalidAttributes,
+    MutexInit_SystemResources,
+    MutexInit_PermissionDenied,
+} MutexInitError;
+
+
+// etc. for MutexLock, CondWait, etc.
 
 enum { STATUS_IDLE = 0, STATUS_OK = 2, STATUS_ERROR = 3 };
 
@@ -179,6 +205,11 @@ static void *worker_thread_entry(void *p_worker_thread_args) {
 /* when a CREATE command is received */
 static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr, Uint8 flags) {
   Uint8 thread_id = find_first_free_thread_num();
+  if (thread_id == (Uint8)-1) {
+    log_printf("handle_create_command: no free thread slots\n");
+    uxn.dev[THREAD_STATUS] = ThreadCreate_ThreadLimitReached;
+    return;
+  }
 
   thread_records[thread_id].arg_0 = entry_address;
   thread_records[thread_id].arg_1 = arg_ptr;
@@ -197,14 +228,30 @@ static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr, Uint8 fl
   if (flags == 1) {
     attr_ptr = &attr;
     pthread_attr_init(attr_ptr);
+
     pthread_attr_setdetachstate(attr_ptr, PTHREAD_CREATE_DETACHED);
 
     thread_records[thread_id].is_detached = true; 
   }
 
-  pthread_create(&thread_records[thread_id].thread_handle, attr_ptr,
+  int error = pthread_create(&thread_records[thread_id].thread_handle, attr_ptr,
                worker_thread_entry, (void *)&thread_records[thread_id]);
   if (attr_ptr) pthread_attr_destroy(attr_ptr);
+  switch (error) {
+    case 0:
+      uxn.dev[THREAD_STATUS] = ThreadCreate_OK;
+      break;
+    case EAGAIN:
+      uxn.dev[THREAD_STATUS] = ThreadCreate_SystemResources;
+    case EINVAL:
+      uxn.dev[THREAD_STATUS] = ThreadCreate_InvalidAttributes;
+    case EPERM:
+      uxn.dev[THREAD_STATUS] = ThreadCreate_PermissionDenied;
+    default:
+      thread_records[thread_id].is_in_use = false;
+      log_printf("handle_create_command: pthread_create failed with error=%d\n", error);
+      return;
+  }
 
   log_printf("handle_create_command: created thread_id=%d\n", thread_id);
   print_thread_id(thread_records[thread_id].thread_handle);
