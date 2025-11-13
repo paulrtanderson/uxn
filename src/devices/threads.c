@@ -156,13 +156,6 @@ static Uint8 find_first_free_thread_num(void) {
   return -1;
 }
 
-/* get a thread record by id */
-static ThreadRecord *get_thread_record(Uint16 thread_id) {
-  if (thread_id >= MAX_THREAD_COUNT) return NULL;
-  /*if (!thread_records[thread_id].is_in_use) return NULL;*/
-  return &thread_records[thread_id];
-}
-
 /* Thread starts evaluating uxn code here */
 static void *worker_thread_entry(void *p_worker_thread_args) {
   ThreadRecord *p_record = (ThreadRecord *)p_worker_thread_args;
@@ -260,18 +253,36 @@ static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr, Uint8 fl
 
 /* when a JOIN command is received */
 static void handle_join_command(Uint16 thread_num) {
-  log_printf("handle_join_command: started\n");
-  ThreadRecord *record = get_thread_record(thread_num);
+  if (thread_num >= MAX_THREAD_COUNT) {
+    log_printf("handle_join_command: invalid thread_num=%d\n", thread_num);
+    uxn.dev[THREAD_STATUS] = ThreadJoin_NotFound;
+    return;
+  }
+  ThreadRecord *record = &thread_records[thread_num];
 
   log_printf("handle_join_command: thread_num=%d\n", thread_num);
   print_thread_id(record->thread_handle);
-  pthread_join(record->thread_handle, NULL);
+  int error = pthread_join(record->thread_handle, NULL);
+  switch (error) {
+    case 0: 
+      uxn.dev[THREAD_STATUS] = ThreadCreate_OK;
+      break;
+    case EDEADLK:
+      uxn.dev[THREAD_STATUS] = ThreadJoin_Deadlock;
+      return;
+    case EINVAL:
+      uxn.dev[THREAD_STATUS] = ThreadJoin_NotJoinable;
+      return;
+    case ESRCH:
+      uxn.dev[THREAD_STATUS] = ThreadJoin_NotFound;
+      return;
+  }
+
   record->is_in_use = false;
   record->is_detached = false;
   record->is_finished = false;
 
   device_set16(RETURN_LO, record->result_value);
-
 
   log_printf("handle_join_command: joined with return value=0x%04x\n", record->result_value);
 }
