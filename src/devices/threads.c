@@ -30,24 +30,24 @@
 */
 
 enum ThreadsPort {
-  THREAD_THREAD_BASE         = 0xD0,
+  THREAD_THREAD_BASE          = 0xD0,
 
-  THREAD_CMD               = 0xD0,
-  THREAD_STATUS            = 0xD1,
+  THREAD_CMD                  = 0xD0,
+  THREAD_STATUS               = 0xD1,
 
-  ARG_0_LO                  = 0xD2,
-  ARG_0_HI            = 0xD3,
+  ARG_0_LO                    = 0xD2,
+  ARG_0_HI                    = 0xD3,
 
-  ARG_1_LO            = 0xD4,
-  ARG_1_HI            = 0xD5,
+  ARG_1_LO                    = 0xD4,
+  ARG_1_HI                    = 0xD5,
 
-  ARG_2_LO            = 0xD6,
-  ARG_2_HI            = 0xD7,
+  ARG_2_LO                    = 0xD6,
+  ARG_2_HI                    = 0xD7,
 
-  RETURN_LO           = 0xD8,
-  RETURN_HI           = 0xD9,
+  RETURN_LO                   = 0xD8,
+  RETURN_HI                   = 0xD9,
 
-  THREAD_USELOCALSTORAGEINDEX             = 0xDA,
+  THREAD_USELOCALSTORAGEINDEX = 0xDA,
 };
 
 typedef enum {
@@ -75,13 +75,18 @@ typedef enum {
 
 enum { STATUS_OK = 0, STATUS_ERROR = 1 };
 
-
 /* CMD meanings
  1 - Create a new thread
  2 - Join a thread
  3 - Detach a thread
 */
-enum { CMD_CREATE = 0x01, CMD_JOIN = 0x02, CMD_DETACH = 0x03 };
+enum { 
+  CMD_CREATE =        0x01, 
+  CMD_JOIN =          0x02, 
+  CMD_DETACH =        0x03, 
+  CMD_MUTEX_LOCK =    0x04, 
+  CMD_MUTEX_UNLOCK =  0x05,
+}
 
 typedef struct {
   pthread_t thread_handle;
@@ -339,6 +344,7 @@ void threads_deo(Uint8 address) {
         uxn.dev[THREAD_STATUS] = STATUS_ERROR;
     }
     break;
+  case: CMD
   default:
     log_printf("threads_deo: Unknown command 0x%02x\n", uxn.dev[THREAD_CMD]);
     uxn.dev[THREAD_STATUS] = STATUS_ERROR;
