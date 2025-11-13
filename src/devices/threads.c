@@ -340,13 +340,11 @@ void threads_deo(Uint8 address) {
         uxn.dev[THREAD_STATUS] = STATUS_OK;
     } else {
         uxn.dev[THREAD_STATUS] = STATUS_ERROR;
-        uxn.dev[THREAD_ERRNO] = EINVAL;
     }
     break;
   default:
     log_printf("threads_deo: Unknown command 0x%02x\n", uxn.dev[THREAD_CMD]);
     uxn.dev[THREAD_STATUS] = STATUS_ERROR;
-    uxn.dev[THREAD_ERRNO] = EINVAL;
     break;
   }
 }
