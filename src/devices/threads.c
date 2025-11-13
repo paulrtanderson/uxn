@@ -73,7 +73,7 @@ typedef enum {
     MutexInit_PermissionDenied,
 } MutexInitError;
 
-enum { STATUS_IDLE = 0, STATUS_OK = 2, STATUS_ERROR = 3 };
+enum { STATUS_OK = 0, STATUS_ERROR = 1 };
 
 
 /* CMD meanings
