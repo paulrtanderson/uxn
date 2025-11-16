@@ -86,7 +86,7 @@ enum {
   CMD_DETACH =        0x03, 
   CMD_MUTEX_LOCK =    0x04, 
   CMD_MUTEX_UNLOCK =  0x05,
-}
+};
 
 typedef struct {
   pthread_t thread_handle;
