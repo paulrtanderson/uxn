@@ -4,12 +4,12 @@
 
 |d0 @Threads
   &cmd      $1
-  &status   $1
+  &errno    $1
   &a0       $2
   &a1       $2
   &a2       $2
   &r0       $2
-  &errno    $1
+  &uselocalstorage    $1
 
 |0100
 
