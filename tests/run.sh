@@ -55,3 +55,8 @@ echo "Failed: $fail"
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
+# Only pause if running in an interactive terminal so ci systems don’t hang
+if [ -t 0 ]; then
+  echo
+  read -rp "Press Enter to exit..."
+fi
