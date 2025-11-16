@@ -8,6 +8,7 @@
 
 #include "../uxn.h"
 #include "threads.h"
+#include "../utils/mutex_array_list.h"
 #include "system.h"
 
 #if LOGGING_ENABLED
@@ -76,18 +77,23 @@ typedef enum {
 enum { STATUS_OK = 0, STATUS_ERROR = 1 };
 
 /* CMD meanings
- 1 - Create a new thread
- 2 - Join a thread
- 3 - Detach a thread
+1 - Create a new thread
+2 - Join a thread
+3 - Detach a thread
+4 - Create a mutex, returns handle in RETURN
+5 - Destroy a mutex given handle in ARG_0
+6 - Lock a mutex given handle in ARG_0
+7 - Unlock a mutex given handle in ARG_0
 */
-enum { 
-  CMD_CREATE =        0x01, 
-  CMD_JOIN =          0x02, 
-  CMD_DETACH =        0x03, 
-  CMD_MUTEX_LOCK =    0x04, 
-  CMD_MUTEX_UNLOCK =  0x05,
+enum {
+  CMD_CREATE =        0x01,
+  CMD_JOIN =          0x02,
+  CMD_DETACH =        0x03,
+  CMD_MUTEX_CREATE =  0x04,
+  CMD_MUTEX_DESTROY = 0x05,
+  CMD_MUTEX_LOCK =    0x06,
+  CMD_MUTEX_UNLOCK =  0x07,
 };
-
 typedef struct {
   pthread_t thread_handle;
   pthread_mutex_t thread_mutex;
@@ -99,6 +105,9 @@ typedef struct {
   bool is_detached;
   bool is_finished;
 } ThreadRecord;
+
+static MutexTable mutex_table = { NULL, 0 };
+static bool mutex_table_initialized = false;
 
 #define MAX_THREAD_COUNT 8
 static ThreadRecord thread_records[MAX_THREAD_COUNT];
@@ -117,6 +126,14 @@ static void initialize_mutexes() {
     for (i = 0; i < MAX_THREAD_COUNT; i++) {
       pthread_mutex_init(&thread_records[i].thread_mutex, NULL);
     }
+    
+    /* Initialize mutex table here - safe because this runs before any threads are created */
+    if (!mutex_table_initialized) {
+      if (mutex_table_init(&mutex_table, 16) == 0) {
+        mutex_table_initialized = true;
+      }
+    }
+    
     mutex_init_done = true;
   }
 }
@@ -344,6 +361,102 @@ void threads_deo(Uint8 address) {
         uxn.dev[THREAD_STATUS] = STATUS_ERROR;
     }
     break;
+  case CMD_MUTEX_CREATE: {
+    unsigned long h;
+    int rc;
+
+    log_printf("threads_deo: CMD_MUTEX_CREATE\n");
+
+    if (!mutex_table_initialized) {
+      rc = mutex_table_init(&mutex_table, 16);
+      if (rc != 0) {
+        uxn.dev[THREAD_STATUS] = MutexInit_SystemResources;
+        device_set16(RETURN_LO, 0);
+        break;
+      }
+      mutex_table_initialized = true;
+    }
+
+    h = mutex_table_create_mutex(&mutex_table);
+    if (h > MT_HANDLE_MAX) {
+      /* Map all current creation errors to "system resources" */
+      uxn.dev[THREAD_STATUS] = MutexInit_SystemResources;
+      device_set16(RETURN_LO, 0);
+    } else {
+      uxn.dev[THREAD_STATUS] = MutexInit_OK;
+      device_set16(RETURN_LO, (Uint16)h);
+    }
+    break;
+  }
+  case CMD_MUTEX_DESTROY: {
+    Uint16 handle = device_get16(ARG_0_LO);
+    unsigned long rc;
+
+    log_printf("threads_deo: CMD_MUTEX_DESTROY\n");
+
+    if (!mutex_table_initialized) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    rc = mutex_table_destroy_mutex(&mutex_table, (unsigned long)handle);
+    if (rc == 0) {
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+    } else {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+    }
+    break;
+  }
+  case CMD_MUTEX_LOCK: {
+    Uint16 handle = device_get16(ARG_0_LO);
+    pthread_mutex_t *m;
+    int rc;
+
+    log_printf("threads_deo: CMD_MUTEX_LOCK\n");
+
+    if (!mutex_table_initialized) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    m = mutex_table_get_mutex(&mutex_table, (unsigned long)handle);
+    if (m == NULL) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    rc = pthread_mutex_lock(m);
+    if (rc == 0)
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+    else
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+    break;
+  }
+  case CMD_MUTEX_UNLOCK: {
+    Uint16 handle = device_get16(ARG_0_LO);
+    pthread_mutex_t *m;
+    int rc;
+
+    log_printf("threads_deo: CMD_MUTEX_UNLOCK\n");
+
+    if (!mutex_table_initialized) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    m = mutex_table_get_mutex(&mutex_table, (unsigned long)handle);
+    if (m == NULL) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    rc = pthread_mutex_unlock(m);
+    if (rc == 0)
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+    else
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+    break;
+  }
   default:
     log_printf("threads_deo: Unknown command 0x%02x\n", uxn.dev[THREAD_CMD]);
     uxn.dev[THREAD_STATUS] = STATUS_ERROR;
