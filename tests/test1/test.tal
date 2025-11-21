@@ -3,13 +3,13 @@
 |10 @Console &vector $2 &read $1 &pad $4 &type $1 &write $1 &error $1
 
 |d0 @Threads
-  &cmd      $1
-  &errno    $1
-  &a0       $2
-  &a1       $2
-  &a2       $2
-  &r0       $2
-  &uselocalstorage    $1
+    &cmd      $1
+    &errno    $1
+    &a0       $2
+    &a1       $2
+    &a2       $2
+    &r0       $2
+    &uselocalstorage    $1
 
 |0100
 
