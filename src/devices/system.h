@@ -9,9 +9,6 @@ THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
 WITH REGARD TO THIS SOFTWARE.
 */
 
-#define BANKS 0x10
-#define BANKS_CAP BANKS * 0x10000
-
 int system_error(char *msg, const char *err);
 int system_boot(Uint8 *ram, char *rom_path, int has_args);
 int system_reboot(int soft);

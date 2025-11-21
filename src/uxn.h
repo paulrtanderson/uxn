@@ -20,6 +20,9 @@ WITH REGARD TO THIS SOFTWARE.
 #define PAGE_PROGRAM 0x0100
 #define PAGE_SIZE 0x10000
 
+#define BANKS 0x10
+#define BANKS_CAP BANKS * 0x10000
+
 typedef unsigned char Uint8;
 typedef signed char Sint8;
 typedef unsigned short Uint16;

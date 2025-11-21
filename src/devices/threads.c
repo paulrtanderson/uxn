@@ -84,6 +84,7 @@ enum { STATUS_OK = 0, STATUS_ERROR = 1 };
 5 - Destroy a mutex given handle in ARG_0
 6 - Lock a mutex given handle in ARG_0
 7 - Unlock a mutex given handle in ARG_0
+8 - Use local storage index
 */
 enum {
   CMD_CREATE =        0x01,
@@ -93,6 +94,7 @@ enum {
   CMD_MUTEX_DESTROY = 0x05,
   CMD_MUTEX_LOCK =    0x06,
   CMD_MUTEX_UNLOCK =  0x07,
+  CMD_USELOCALSTORAGEINDEX = 0x08,
 };
 typedef struct {
   pthread_t thread_handle;
@@ -135,6 +137,10 @@ static void initialize_mutexes() {
     }
     
     mutex_init_done = true;
+
+    /* first record is main thread */
+    thread_records[0].is_in_use = true;
+    thread_records[0].thread_handle = pthread_self();
   }
 }
 
@@ -331,12 +337,39 @@ unlock:
     return result;
 }
 
+Uint8 get_current_thread_num(void) {
+    pthread_t self = pthread_self();
+    Uint8 i;
+
+    for (i = 0; i < MAX_THREAD_COUNT; i++) {
+      log_printf("get_current_thread_num: checking thread_num=%d\n", i);
+        if (thread_records[i].is_in_use) {
+            if (pthread_equal(thread_records[i].thread_handle, self)) {
+              log_printf("get_current_thread_num: found current thread at thread_num=%d\n", i);
+                return i;
+            }
+        }
+    }
+
+    return (Uint8)-1;
+}
+
 /* Device write entry */
 void threads_deo(Uint8 address) {
   if ((address & 0xf0) != THREAD_CMD) return; /* bitwise AND to check high nibble is in the thread device range */
-  if ((address & 0x0f) != 0x00) return; /* bitwise AND to check low nibble is 0x0 (only THREAD_CMD has writable side affects) */
+  if ((address & 0x0f) != 0x00 && address != THREAD_USELOCALSTORAGEINDEX) return; /* bitwise AND to check address (low nibble is 0x0 or is THREAD_USELOCALSTORAGEINDEX) (only THREAD_CMD and THREAD_USELOCALSTORAGEINDEX have writable side affects) */
 
   initialize_mutexes();
+
+  if (address == THREAD_USELOCALSTORAGEINDEX) {      /* max int will set to current thread num otherwise just use cmd val */
+    log_printf("threads_deo: CMD_USELOCALSTORAGEINDEX with value=0x%02x\n", uxn.dev[THREAD_USELOCALSTORAGEINDEX]);
+      if (uxn.dev[THREAD_USELOCALSTORAGEINDEX] == (Uint8)-1) {
+          Uint8 thread_num = get_current_thread_num();
+          log_printf("threads_deo: setting to current thread number %d\n", thread_num);
+          uxn.dev[THREAD_USELOCALSTORAGEINDEX] = thread_num;
+      }
+      return;
+  }
 
   switch (uxn.dev[THREAD_CMD]) {
   case CMD_CREATE:
