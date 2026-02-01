@@ -1,0 +1,125 @@
+( Test condition variable: producer signals consumer )
+
+|10 @Console &vector $2 &read $1 &pad $4 &type $1 &write $1 &error $1
+
+|d0 @Threads
+    &cmd      $1
+    &errno    $1
+    &a0       $2
+    &a1       $2
+    &a2       $2
+    &r0       $2
+    &uselocalstorage    $1
+
+|0100 
+
+@on-reset ( -> )
+  ( Create mutex )
+  #04 .Threads/cmd DEO
+  .Threads/r0 DEI2 ;mutex STA2
+  
+  ( Create condition variable )
+  #09 .Threads/cmd DEO
+  .Threads/r0 DEI2 ;cond STA2
+  
+  ( Initialize ready flag to 0 )
+  #00 ;ready STA
+  
+  ( Initialize data to 0 )
+  #0000 ;data STA2
+  
+  ( Create consumer thread - it will wait for signal )
+  ;consumer .Threads/a0 DEO2
+  #0000 .Threads/a1 DEO2
+  #0000 .Threads/a2 DEO2
+  #01 .Threads/cmd DEO
+  .Threads/r0 DEI2 ;thread1 STA2
+  
+  ( Create producer thread - it will signal )
+  ;producer .Threads/a0 DEO2
+  #0000 .Threads/a1 DEO2
+  #0000 .Threads/a2 DEO2
+  #01 .Threads/cmd DEO
+  .Threads/r0 DEI2 ;thread2 STA2
+  
+  ( Join consumer thread )
+  ;thread1 LDA2 .Threads/a0 DEO2
+  #02 .Threads/cmd DEO
+  
+  ( Join producer thread )
+  ;thread2 LDA2 .Threads/a0 DEO2
+  #02 .Threads/cmd DEO
+  
+  ( Print data value - should be 42 if signal worked )
+  ;data LDA2 ;pdec JSR2
+  
+  ( Destroy condition variable )
+  ;cond LDA2 .Threads/a0 DEO2
+  #0a .Threads/cmd DEO
+  
+  ( Destroy mutex ) 
+  ;mutex LDA2 .Threads/a0 DEO2
+  #05 .Threads/cmd DEO
+BRK
+
+@consumer ( -> )
+  ( Lock mutex )
+  ;mutex LDA2 .Threads/a0 DEO2
+  #06 .Threads/cmd DEO
+  
+  ( Wait for ready flag in a loop - spurious wakeups )
+  &waitloop
+    ;ready LDA #00 EQU ?&dowait
+    !&done
+    &dowait
+    ( Wait on condition variable )
+    ;cond LDA2 .Threads/a0 DEO2
+    ;mutex LDA2 .Threads/a1 DEO2
+    #0b .Threads/cmd DEO
+    !&waitloop
+  &done
+  
+  ( Read data after being signaled )
+  ( Data should now be 42 )
+  
+  ( Unlock mutex )
+  ;mutex LDA2 .Threads/a0 DEO2
+  #07 .Threads/cmd DEO
+  BRK
+
+@producer ( -> )
+  ( Lock mutex )
+  ;mutex LDA2 .Threads/a0 DEO2
+  #06 .Threads/cmd DEO
+  
+  ( Set data to 42 )
+  #002a ;data STA2
+  
+  ( Set ready flag )
+  #01 ;ready STA
+  
+  ( Signal consumer )
+  ;cond LDA2 .Threads/a0 DEO2
+  #0c .Threads/cmd DEO
+  
+  ( Unlock mutex )
+  ;mutex LDA2 .Threads/a0 DEO2
+  #07 .Threads/cmd DEO
+  BRK
+
+@pdec ( short* -- )
+    #000a SWP2 [ LITr ff ]
+    &>get ( -- )
+        SWP2k DIV2k MUL2 SUB2 STH
+        POP OVR2 DIV2 ORAk ?&>get
+    POP2 POP2
+    &>put ( -- )
+        STHr INCk ?{ POP JMP2r }
+        [ LIT "0 ] ADD .Console/error DEO !&>put
+
+@data $2
+@ready $1
+@mutex $2
+@cond $2
+@thread1 $2
+@thread2 $2

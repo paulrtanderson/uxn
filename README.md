@@ -176,6 +176,120 @@ Uxntal wrapper
   - Pops: 2 bytes (mid)
   - Pushes: 1 byte (status)
 
+---
+
+Command: COND_CREATE (0x09)
+Device API
+- Writes:
+  - CMD (D0): 0x09
+- Reads:
+  - R0 (D8–D9): COND_ID (16-bit) on success; error code on error
+  - STATUS (D1)
+
+Uxntal wrapper
+```tal
+@COND.CREATE  ( -- cid|err status )
+    #09   DEO  Threads/CMD
+    DEI2  Threads/R0
+    DEI   Threads/STATUS
+```
+- Wrapper stack interaction:
+  - Pops: 0 bytes
+  - Pushes: 3 bytes (cid-or-err 2, status 1)
+
+---
+
+Command: COND_DESTROY (0x0A)
+Device API
+- Writes:
+  - A0 (D2–D3): COND_ID (16-bit)
+  - CMD (D0): 0x0A
+- Reads:
+  - STATUS (D1)
+  - (R0 unused)
+
+Uxntal wrapper
+```tal
+@COND.DESTROY  ( cid -- status )
+    DEO2 Threads/A0
+    #0a   DEO Threads/CMD
+    DEI   Threads/STATUS
+```
+- Wrapper stack interaction:
+  - Pops: 2 bytes (cid)
+  - Pushes: 1 byte (status)
+
+---
+
+Command: COND_WAIT (0x0B)
+Device API
+- Writes:
+  - A0 (D2–D3): COND_ID (16-bit)
+  - A1 (D4–D5): MUTEX_ID (16-bit) — mutex must be locked by caller
+  - CMD (D0): 0x0B
+- Reads:
+  - STATUS (D1)
+  - (R0 unused)
+
+Uxntal wrapper
+```tal
+@COND.WAIT  ( cid mid -- status )
+    DEO2 Threads/A1
+    DEO2 Threads/A0
+    #0b   DEO Threads/CMD
+    DEI   Threads/STATUS
+```
+- Wrapper stack interaction:
+  - Pops: 4 bytes (cid 2, mid 2)
+  - Pushes: 1 byte (status)
+- Note: The mutex is atomically released while waiting and re-acquired before returning.
+
+---
+
+Command: COND_SIGNAL (0x0C)
+Device API
+- Writes:
+  - A0 (D2–D3): COND_ID (16-bit)
+  - CMD (D0): 0x0C
+- Reads:
+  - STATUS (D1)
+  - (R0 unused)
+
+Uxntal wrapper
+```tal
+@COND.SIGNAL  ( cid -- status )
+    DEO2 Threads/A0
+    #0c   DEO Threads/CMD
+    DEI   Threads/STATUS
+```
+- Wrapper stack interaction:
+  - Pops: 2 bytes (cid)
+  - Pushes: 1 byte (status)
+- Note: Wakes up one thread waiting on the condition variable.
+
+---
+
+Command: COND_BROADCAST (0x0D)
+Device API
+- Writes:
+  - A0 (D2–D3): COND_ID (16-bit)
+  - CMD (D0): 0x0D
+- Reads:
+  - STATUS (D1)
+  - (R0 unused)
+
+Uxntal wrapper
+```tal
+@COND.BROADCAST  ( cid -- status )
+    DEO2 Threads/A0
+    #0d   DEO Threads/CMD
+    DEI   Threads/STATUS
+```
+- Wrapper stack interaction:
+  - Pops: 2 bytes (cid)
+  - Pushes: 1 byte (status)
+- Note: Wakes up all threads waiting on the condition variable.
+
 Error handling
 - All wrappers **push STATUS** onto the stack. Callers **must check STATUS** after each invocation.
 - `STATUS` values:
@@ -184,9 +298,19 @@ Error handling
 
 
 Currently implemented commands:
-- `CMD_CREATE (1)` — Spawn a new thread executing at the address in `PTR`
-- `CMD_JOIN (2)` — Wait for a thread specified by `TARGET_THREAD` to finish
-- These are not yet implemented to the above specification - fix coming soon!
+- `CMD_CREATE (0x01)` — Spawn a new thread executing at the address in `PTR`
+- `CMD_JOIN (0x02)` — Wait for a thread specified by `TARGET_THREAD` to finish
+- `CMD_DETACH (0x03)` — Detach a thread
+- `CMD_MUTEX_CREATE (0x04)` — Create a new mutex, returns handle in R0
+- `CMD_MUTEX_DESTROY (0x05)` — Destroy a mutex given handle in A0
+- `CMD_MUTEX_LOCK (0x06)` — Lock a mutex given handle in A0
+- `CMD_MUTEX_UNLOCK (0x07)` — Unlock a mutex given handle in A0
+- `CMD_USELOCALSTORAGEINDEX (0x08)` — Use local storage index
+- `CMD_COND_CREATE (0x09)` — Create a condition variable, returns handle in R0
+- `CMD_COND_DESTROY (0x0A)` — Destroy a condition variable given handle in A0
+- `CMD_COND_WAIT (0x0B)` — Wait on a condition variable (A0=cond, A1=mutex)
+- `CMD_COND_SIGNAL (0x0C)` — Signal one thread waiting on condition variable in A0
+- `CMD_COND_BROADCAST (0x0D)` — Signal all threads waiting on condition variable in A0
 
 Below is the readme of the canonical uxn implementation, the build instructions remain the same for this fork.
 

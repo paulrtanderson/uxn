@@ -17,6 +17,7 @@
 #include "devices/controller.h"
 #include "devices/mouse.h"
 #include "devices/datetime.h"
+#include "devices/threads.h"
 #if defined(_WIN32) && defined(_WIN32_WINNT) && _WIN32_WINNT > 0x0602
 #include <processthreadsapi.h>
 #elif defined(_WIN32)
@@ -119,6 +120,7 @@ emu_deo(Uint8 addr, Uint8 value)
 	case 0x90: mouse_deo(addr); break;
 	case 0xa0: file_deo(addr); break;
 	case 0xb0: file_deo(addr); break;
+	case 0xd0: threads_deo(addr); break;
 	}
 }
 

@@ -9,6 +9,7 @@
 #include "../uxn.h"
 #include "threads.h"
 #include "../utils/mutex_array_list.h"
+#include "../utils/cond_array_list.h"
 #include "system.h"
 
 #if LOGGING_ENABLED
@@ -74,6 +75,13 @@ typedef enum {
     MutexInit_PermissionDenied,
 } MutexInitError;
 
+typedef enum {
+    CondInit_OK = 0,
+    CondInit_InvalidAttributes,
+    CondInit_SystemResources,
+    CondInit_PermissionDenied,
+} CondInitError;
+
 enum { STATUS_OK = 0, STATUS_ERROR = 1 };
 
 /* CMD meanings
@@ -95,6 +103,11 @@ enum {
   CMD_MUTEX_LOCK =    0x06,
   CMD_MUTEX_UNLOCK =  0x07,
   CMD_USELOCALSTORAGEINDEX = 0x08,
+  CMD_COND_CREATE =   0x09,
+  CMD_COND_DESTROY =  0x0A,
+  CMD_COND_WAIT =     0x0B,
+  CMD_COND_SIGNAL =   0x0C,
+  CMD_COND_BROADCAST = 0x0D,
 };
 typedef struct {
   pthread_t thread_handle;
@@ -110,6 +123,9 @@ typedef struct {
 
 static MutexTable mutex_table = { NULL, 0 };
 static bool mutex_table_initialized = false;
+
+static CondTable cond_table = { NULL, 0 };
+static bool cond_table_initialized = false;
 
 #define MAX_THREAD_COUNT 8
 static ThreadRecord thread_records[MAX_THREAD_COUNT];
@@ -463,7 +479,7 @@ void threads_deo(Uint8 address) {
       uxn.dev[THREAD_STATUS] = STATUS_OK;
     else
       uxn.dev[THREAD_STATUS] = STATUS_ERROR;
-    break;
+    break;  
   }
   case CMD_MUTEX_UNLOCK: {
     Uint16 handle = device_get16(ARG_0_LO);
@@ -484,6 +500,135 @@ void threads_deo(Uint8 address) {
     }
 
     rc = pthread_mutex_unlock(m);
+    if (rc == 0)
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+    else
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+    break;
+  }
+  case CMD_COND_CREATE: {
+    unsigned long h;
+    int rc;
+
+    log_printf("threads_deo: CMD_COND_CREATE\n");
+
+    if (!cond_table_initialized) {
+      rc = cond_table_init(&cond_table, 16);
+      if (rc != 0) {
+        uxn.dev[THREAD_STATUS] = CondInit_SystemResources;
+        device_set16(RETURN_LO, 0);
+        break;
+      }
+      cond_table_initialized = true;
+    }
+
+    h = cond_table_create_cond(&cond_table);
+    if (h > CT_HANDLE_MAX) {
+      /* Map all current creation errors to "system resources" */
+      uxn.dev[THREAD_STATUS] = CondInit_SystemResources;
+      device_set16(RETURN_LO, 0);
+    } else {
+      uxn.dev[THREAD_STATUS] = CondInit_OK;
+      device_set16(RETURN_LO, (Uint16)h);
+    }
+    break;
+  }
+  case CMD_COND_DESTROY: {
+    Uint16 handle = device_get16(ARG_0_LO);
+    unsigned long rc;
+
+    log_printf("threads_deo: CMD_COND_DESTROY\n");
+
+    if (!cond_table_initialized) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    rc = cond_table_destroy_cond(&cond_table, (unsigned long)handle);
+    if (rc == 0) {
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+    } else {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+    }
+    break;
+  }
+  case CMD_COND_WAIT: {
+    Uint16 cond_handle = device_get16(ARG_0_LO);
+    Uint16 mutex_handle = device_get16(ARG_1_LO);
+    pthread_cond_t *c;
+    pthread_mutex_t *m;
+    int rc;
+
+    log_printf("threads_deo: CMD_COND_WAIT cond=%d mutex=%d\n", cond_handle, mutex_handle);
+
+    if (!cond_table_initialized || !mutex_table_initialized) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    c = cond_table_get_cond(&cond_table, (unsigned long)cond_handle);
+    if (c == NULL) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    m = mutex_table_get_mutex(&mutex_table, (unsigned long)mutex_handle);
+    if (m == NULL) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    rc = pthread_cond_wait(c, m);
+    if (rc == 0)
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+    else
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+    break;
+  }
+  case CMD_COND_SIGNAL: {
+    Uint16 handle = device_get16(ARG_0_LO);
+    pthread_cond_t *c;
+    int rc;
+
+    log_printf("threads_deo: CMD_COND_SIGNAL\n");
+
+    if (!cond_table_initialized) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    c = cond_table_get_cond(&cond_table, (unsigned long)handle);
+    if (c == NULL) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    rc = pthread_cond_signal(c);
+    if (rc == 0)
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+    else
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+    break;
+  }
+  case CMD_COND_BROADCAST: {
+    Uint16 handle = device_get16(ARG_0_LO);
+    pthread_cond_t *c;
+    int rc;
+
+    log_printf("threads_deo: CMD_COND_BROADCAST\n");
+
+    if (!cond_table_initialized) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    c = cond_table_get_cond(&cond_table, (unsigned long)handle);
+    if (c == NULL) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    rc = pthread_cond_broadcast(c);
     if (rc == 0)
       uxn.dev[THREAD_STATUS] = STATUS_OK;
     else
