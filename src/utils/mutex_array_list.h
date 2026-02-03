@@ -15,6 +15,7 @@
 typedef struct {
     pthread_mutex_t **slots;
     size_t capacity;
+    pthread_mutex_t lock;  /* protects this table from concurrent access */
 } MutexTable;
 
 /*

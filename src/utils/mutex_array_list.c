@@ -5,11 +5,16 @@
 int mutex_table_init(MutexTable *t, size_t initial_capacity) {
     size_t i;
 
+    if (pthread_mutex_init(&t->lock, NULL) != 0)
+        return -1;
+
     t->slots =
         (pthread_mutex_t **)malloc(initial_capacity *
                                    sizeof(pthread_mutex_t *));
-    if (t->slots == NULL)
+    if (t->slots == NULL) {
+        pthread_mutex_destroy(&t->lock);
         return -1;
+    }
 
     t->capacity = initial_capacity;
 
@@ -19,7 +24,8 @@ int mutex_table_init(MutexTable *t, size_t initial_capacity) {
     return 0;
 }
 
-unsigned long mutex_table_create_mutex(MutexTable *t) {
+/* must be called with t->lock held */
+static unsigned long mutex_table_create_mutex_locked(MutexTable *t) {
     size_t i;
     pthread_mutex_t *m;
 
@@ -59,24 +65,53 @@ unsigned long mutex_table_create_mutex(MutexTable *t) {
     }
 
     /* retry after growing */
-    return mutex_table_create_mutex(t);
+    return mutex_table_create_mutex_locked(t);
+}
+
+unsigned long mutex_table_create_mutex(MutexTable *t) {
+    unsigned long result;
+
+    pthread_mutex_lock(&t->lock);
+    result = mutex_table_create_mutex_locked(t);
+    pthread_mutex_unlock(&t->lock);
+
+    return result;
 }
 
 unsigned long mutex_table_destroy_mutex(MutexTable *t, unsigned long h) {
-    if (h >= t->capacity)
+    unsigned long result;
+
+    pthread_mutex_lock(&t->lock);
+
+    if (h >= t->capacity) {
+        pthread_mutex_unlock(&t->lock);
         return MT_ERR_BAD_HANDLE;
-    if (t->slots[h] == NULL)
+    }
+    if (t->slots[h] == NULL) {
+        pthread_mutex_unlock(&t->lock);
         return MT_ERR_BAD_HANDLE;
+    }
 
     pthread_mutex_destroy(t->slots[h]);
     free(t->slots[h]);
     t->slots[h] = NULL;
+    result = 0;
 
-    return 0;
+    pthread_mutex_unlock(&t->lock);
+    return result;
 }
 
 pthread_mutex_t *mutex_table_get_mutex(MutexTable *t, unsigned long h) {
-    if (h >= t->capacity)
+    pthread_mutex_t *result;
+
+    pthread_mutex_lock(&t->lock);
+
+    if (h >= t->capacity) {
+        pthread_mutex_unlock(&t->lock);
         return NULL;
-    return t->slots[h];
+    }
+    result = t->slots[h];
+
+    pthread_mutex_unlock(&t->lock);
+    return result;
 }

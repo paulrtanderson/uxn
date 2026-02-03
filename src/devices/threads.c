@@ -121,6 +121,7 @@ typedef struct {
   bool is_finished;
 } ThreadRecord;
 
+/* TODO: fix race condition if two threads try to initialised this*/
 static MutexTable mutex_table = { NULL, 0 };
 static bool mutex_table_initialized = false;
 
