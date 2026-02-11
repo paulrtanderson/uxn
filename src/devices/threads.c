@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <time.h>
 
 #include "../uxn.h"
 #include "threads.h"
@@ -82,6 +83,13 @@ typedef enum {
     CondInit_PermissionDenied,
 } CondInitError;
 
+typedef enum {
+    CondTimedWait_OK = 0,
+    CondTimedWait_Timeout,
+    CondTimedWait_InvalidArgs,
+    CondTimedWait_ClockFail,
+} CondTimedWaitResult;
+
 enum { STATUS_OK = 0, STATUS_ERROR = 1 };
 
 /* CMD meanings
@@ -93,6 +101,12 @@ enum { STATUS_OK = 0, STATUS_ERROR = 1 };
 6 - Lock a mutex given handle in ARG_0
 7 - Unlock a mutex given handle in ARG_0
 8 - Use local storage index
+9 - Create a condition variable, returns handle in RETURN
+A - Destroy a condition variable given handle in ARG_0
+B - Wait on a condition variable (ARG_0=cond, ARG_1=mutex)
+C - Signal one thread waiting on condition variable in ARG_0
+D - Broadcast all threads waiting on condition variable in ARG_0
+E - Timed wait on a condition variable (ARG_0=cond, ARG_1=mutex, ARG_2=timeout_ms)
 */
 enum {
   CMD_CREATE =        0x01,
@@ -108,6 +122,7 @@ enum {
   CMD_COND_WAIT =     0x0B,
   CMD_COND_SIGNAL =   0x0C,
   CMD_COND_BROADCAST = 0x0D,
+  CMD_COND_TIMEDWAIT = 0x0E,
 };
 typedef struct {
   pthread_t thread_handle;
@@ -634,6 +649,65 @@ void threads_deo(Uint8 address) {
       uxn.dev[THREAD_STATUS] = STATUS_OK;
     else
       uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+    break;
+  }
+  case CMD_COND_TIMEDWAIT: {
+    Uint16 cond_handle = device_get16(ARG_0_LO);
+    Uint16 mutex_handle = device_get16(ARG_1_LO);
+    Uint16 timeout_ms = device_get16(ARG_2_LO);
+    pthread_cond_t *c;
+    pthread_mutex_t *m;
+    struct timespec ts;
+    int rc;
+
+    log_printf("threads_deo: CMD_COND_TIMEDWAIT cond=%d mutex=%d timeout_ms=%d\n",
+               cond_handle, mutex_handle, timeout_ms);
+
+    if (!cond_table_initialized || !mutex_table_initialized) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      device_set16(RETURN_LO, (Uint16)CondTimedWait_InvalidArgs);
+      break;
+    }
+
+    c = cond_table_get_cond(&cond_table, (unsigned long)cond_handle);
+    if (c == NULL) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      device_set16(RETURN_LO, (Uint16)CondTimedWait_InvalidArgs);
+      break;
+    }
+
+    m = mutex_table_get_mutex(&mutex_table, (unsigned long)mutex_handle);
+    if (m == NULL) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      device_set16(RETURN_LO, (Uint16)CondTimedWait_InvalidArgs);
+      break;
+    }
+
+    /* Compute absolute deadline from relative ms timeout */
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      device_set16(RETURN_LO, (Uint16)CondTimedWait_ClockFail);
+      break;
+    }
+
+    ts.tv_sec  += timeout_ms / 1000;
+    ts.tv_nsec += (timeout_ms % 1000) * 1000000L;
+    if (ts.tv_nsec >= 1000000000L) {
+      ts.tv_sec  += 1;
+      ts.tv_nsec -= 1000000000L;
+    }
+
+    rc = pthread_cond_timedwait(c, m, &ts);
+    if (rc == 0) {
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+      device_set16(RETURN_LO, (Uint16)CondTimedWait_OK);
+    } else if (rc == ETIMEDOUT) {
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+      device_set16(RETURN_LO, (Uint16)CondTimedWait_Timeout);
+    } else {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      device_set16(RETURN_LO, (Uint16)CondTimedWait_InvalidArgs);
+    }
     break;
   }
   default:

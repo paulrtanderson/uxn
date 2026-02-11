@@ -290,6 +290,34 @@ Uxntal wrapper
   - Pushes: 1 byte (status)
 - Note: Wakes up all threads waiting on the condition variable.
 
+---
+
+Command: COND_TIMEDWAIT (0x0E)
+Device API
+- Writes:
+  - A0 (D2–D3): COND_ID (16-bit)
+  - A1 (D4–D5): MUTEX_ID (16-bit) — mutex must be locked by caller
+  - A2 (D6–D7): TIMEOUT_MS (16-bit) — timeout in milliseconds (0–65535)
+  - CMD (D0): 0x0E
+- Reads:
+  - R0 (D8–D9): Result code (0 = signalled, 1 = timed out, 2 = invalid args, 3 = clock failure)
+  - STATUS (D1)
+
+Uxntal wrapper
+```tal
+@COND.TIMEDWAIT  ( cid mid timeout -- result status )
+    DEO2 Threads/A2
+    DEO2 Threads/A1
+    DEO2 Threads/A0
+    #0e   DEO Threads/CMD
+    DEI2 Threads/R0
+    DEI   Threads/STATUS
+```
+- Wrapper stack interaction:
+  - Pops: 6 bytes (cid 2, mid 2, timeout 2)
+  - Pushes: 3 bytes (result 2, status 1)
+- Note: Like `pthread_cond_timedwait` but takes a relative timeout in milliseconds rather than an absolute timestamp, since Uxn is 16-bit. The mutex is atomically released while waiting and re-acquired before returning. STATUS=0 on both signal and timeout; check R0 to distinguish (0=signalled, 1=timed out).
+
 Error handling
 - All wrappers **push STATUS** onto the stack. Callers **must check STATUS** after each invocation.
 - `STATUS` values:
@@ -311,6 +339,7 @@ Currently implemented commands:
 - `CMD_COND_WAIT (0x0B)` — Wait on a condition variable (A0=cond, A1=mutex)
 - `CMD_COND_SIGNAL (0x0C)` — Signal one thread waiting on condition variable in A0
 - `CMD_COND_BROADCAST (0x0D)` — Signal all threads waiting on condition variable in A0
+- `CMD_COND_TIMEDWAIT (0x0E)` — Timed wait on a condition variable (A0=cond, A1=mutex, A2=timeout_ms)
 
 Below is the readme of the canonical uxn implementation, the build instructions remain the same for this fork.
 
