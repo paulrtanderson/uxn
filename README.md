@@ -53,9 +53,9 @@ Device API
 Uxntal wrapper
 ```tal
 @THREAD.CREATE  ( entry arg flags -- tid|err status )
-    DEO2 Threads/A0
-    DEO2 Threads/A1
     DEO2 Threads/A2
+    DEO2 Threads/A1
+    DEO2 Threads/A0
     #01   DEO Threads/CMD
     DEI2  Threads/R0
     DEI   Threads/STATUS
@@ -89,11 +89,11 @@ Uxntal wrapper
 
 ---
 
-Command: MUTEX_INIT (0x10)
+Command: MUTEX_INIT (0x04)
 Device API
 - Writes:
   - A0 (D2–D3): ATTR_PTR (16-bit, 0 if none)
-  - CMD (D0): 0x10
+  - CMD (D0): 0x04
 - Reads:
   - R0 (D8–D9): MUTEX_ID (16-bit) on success; error code on error
   - STATUS (D1)
@@ -102,7 +102,7 @@ Uxntal wrapper
 ```tal
 @MUTEX.INIT  ( -- mid|err status )
     #0000 DEO2 Threads/A0
-    #10   DEO  Threads/CMD
+    #04   DEO  Threads/CMD
     DEI2  Threads/R0
     DEI   Threads/STATUS
 ```
@@ -112,11 +112,11 @@ Uxntal wrapper
 
 ---
 
-Command: MUTEX_LOCK (0x11)
+Command: MUTEX_LOCK (0x06)
 Device API
 - Writes:
   - A0 (D2–D3): MUTEX_ID (16-bit)
-  - CMD (D0): 0x11
+  - CMD (D0): 0x06
 - Reads:
   - STATUS (D1)
   - (R0 unused)
@@ -125,7 +125,7 @@ Uxntal wrapper
 ```tal
 @MUTEX.LOCK  ( mid -- status )
     DEO2 Threads/A0
-    #11   DEO Threads/CMD
+    #06   DEO Threads/CMD
     DEI   Threads/STATUS
 ```
 - Wrapper stack interaction:
@@ -134,11 +134,11 @@ Uxntal wrapper
 
 ---
 
-Command: MUTEX_UNLOCK (0x12)
+Command: MUTEX_UNLOCK (0x07)
 Device API
 - Writes:
   - A0 (D2–D3): MUTEX_ID (16-bit)
-  - CMD (D0): 0x12
+  - CMD (D0): 0x07
 - Reads:
   - STATUS (D1)
   - (R0 unused)
@@ -147,7 +147,7 @@ Uxntal wrapper
 ```tal
 @MUTEX.UNLOCK  ( mid -- status )
     DEO2 Threads/A0
-    #12   DEO Threads/CMD
+    #07   DEO Threads/CMD
     DEI   Threads/STATUS
 ```
 - Wrapper stack interaction:
@@ -156,11 +156,11 @@ Uxntal wrapper
 
 ---
 
-Command: MUTEX_DESTROY (0x13)
+Command: MUTEX_DESTROY (0x05)
 Device API
 - Writes:
   - A0 (D2–D3): MUTEX_ID (16-bit)
-  - CMD (D0): 0x13
+  - CMD (D0): 0x05
 - Reads:
   - STATUS (D1)
   - (R0 unused)
@@ -169,7 +169,7 @@ Uxntal wrapper
 ```tal
 @MUTEX.DESTROY  ( mid -- status )
     DEO2 Threads/A0
-    #13   DEO Threads/CMD
+    #05   DEO Threads/CMD
     DEI   Threads/STATUS
 ```
 - Wrapper stack interaction:
