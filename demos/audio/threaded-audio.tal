@@ -99,7 +99,7 @@ BRK
     STH ( stash note index to return stack )
 
     ;sleep-mutex LDA2 ;MUTEX.LOCK JSR2 POP
-
+    ( 00e9 is 233 )
     ;sleep-cond LDA2 ;sleep-mutex LDA2 #00e9 ;COND.TIMEDWAIT JSR2 POP POP2
 
     ;sleep-mutex LDA2 ;MUTEX.UNLOCK JSR2 POP
