@@ -12,7 +12,7 @@
 ( #0010  336x256      672x512 )
 ( #0020  672x512    1344x1024 )
 
-%SCALE  { #0009 } (    32 )
+%SCALE  { #0020 } (    16 )
 %WIDTH  { #0015 } (    21 )
 %HEIGHT { #0010 } (    16 )
 %XMIN   { #de69 } ( -8601 => -8601/4096 => -2.100 )
@@ -22,6 +22,8 @@
 
 |00 @System &vector $2 &wst $1 &rst $1 &eaddr $2 &ecode $1 &pad $1 &r $2 &g $2 &b $2 &debug $1 &halt $1
 |20 @Screen &vector $2 &width $2 &height $2 &auto $1 &pad $1 &x $2 &y $2 &addr $2 &pixel $1 &sprite $1
+
+|80 @state &y $2 &dx $2 &dy $2
 
 |0100 ( -> )
 
@@ -34,8 +36,19 @@
 	width #10 SFT2 .Screen/width  DEO2
 	height #10 SFT2 .Screen/height DEO2
 
-	( run )
-	draw-mandel BRK
+	( compute x/y step sizes )
+	XMAX XMIN SUB2 width DIV2 .state/dx STZ2
+	YMAX YMIN SUB2 height DIV2 .state/dy STZ2
+
+	( init y to ymin )
+	YMIN .state/y STZ2
+
+	( auto-advance x on pixel draw )
+	[ LIT2 01 -Screen/auto ] DEO
+
+	( render one row per frame )
+	;on-frame .Screen/vector DEO2
+	BRK
 
 ( logical width )
 @width ( -> w* )
@@ -45,30 +58,38 @@
 @height ( -> h* )
     HEIGHT SCALE MUL2 JMP2r
 
-( draw the mandelbrot set using 4.12 fixed point numbers )
-@draw-mandel ( -> )
-	XMAX XMIN SUB2 width DIV2 ,&dx STR2 ( ; &dx<-{xmax-min}/width )
-	YMAX YMIN SUB2 height DIV2 ,&dy STR2 ( ; &dy<-{ymax-ymin}/height )
-	[ LIT2 01 -Screen/auto ] DEO         ( ; auto<-1 )
-	LIT2r 8000                           ( [8000] )
-	YMAX YMIN                            ( ymax* ymin* [8000] )
-	&yloop                               ( ymax* y* [8000] )
-		XMAX XMIN                        ( ymax* y* xmax* xmin* [8000] )
-		&xloop                           ( ymax* y* xmax* x* [8000] )
-			ROT2k evaluate               ( ymax* y* xmax* x* xmax* count^ [8000] )
-			draw-px POP2                 ( ymax* y* xmax* x* [8000] )
-			[ LIT2 &dx $2 ] ADD2         ( ymax* y* xmax* x+dx* [8000] )
-			OVR2 STH2kr ADD2             ( ymax* y* xmax* x+dx* 8000+xmax* [8000] )
-			OVR2 STH2kr ADD2             ( ymax* y* xmax* x+dx* 8000+xmax* 8000+x+dx* [8000] )
-			GTH2 ?&xloop                 ( ymax* y* xmax* x+dx* [8000] )
-		POP2 POP2                        ( ymax* y* [8000] )
-		#0000 .Screen/x DEO2             ( ymax* y* [8000] ; sc/x<-0 )
-		.Screen/y ;inc2 adjust           ( ymax* y* [8000] ; sc/y<-sy+1 )
-		[ LIT2 &dy $2 ] ADD2             ( ymax* y+dy* [8000] )
-		OVR2 STH2kr ADD2                 ( ymax* y+dy* 8000+ymax* [8000] )
-		OVR2 STH2kr ADD2                 ( ymax* y+dy* 8000+ymax* 8000+y+dy* [8000] )
-		GTH2 ?&yloop                     ( ymax* y+dy* [8000] )
-	POP2 POP2 POP2r JMP2r                ( )
+( draw many rows of the mandelbrot set per frame )
+( ROWS-PER-FRAME controls how many rows are drawn before )
+( yielding to the screen. higher = faster, lower = smoother )
+%ROWS-PER-FRAME { #0004 } ( 32 rows per frame )
+
+@on-frame ( -> )
+	ROWS-PER-FRAME                       ( batch^ )
+	&batch                               ( batch^ )
+	( check if y has passed ymax )
+	.state/y LDZ2                        ( batch^ y* )
+	DUP2 #8000 ADD2                      ( batch^ y* y+8k* )
+	YMAX #8000 ADD2                      ( batch^ y* y+8k* ymax+8k* )
+	LTH2 ?&row                           ( batch^ y* ; continue if y < ymax )
+	POP2 POP                             ( )
+	#0000 .Screen/vector DEO2            ( ; done, stop rendering )
+	BRK
+	&row                                 ( batch^ y* )
+	#0000 .Screen/x DEO2                 ( batch^ y* ; reset x )
+	XMIN                                 ( batch^ y* x* )
+	&xloop                               ( batch^ y* x* )
+		OVR2 OVR2 SWP2 evaluate          ( batch^ y* x* count^ )
+		draw-px                          ( batch^ y* x* )
+		.state/dx LDZ2 ADD2              ( batch^ y* x'* )
+		DUP2 #8000 ADD2                  ( batch^ y* x'* x'+8k* )
+		XMAX #8000 ADD2                  ( batch^ y* x'* x'+8k* xmax+8k* )
+		LTH2 ?&xloop                    ( batch^ y* x'* )
+	POP2 POP2                            ( batch^ )
+	.Screen/y ;inc2 adjust               ( batch^ ; Screen/y += 2 )
+	.state/y LDZ2 .state/dy LDZ2        ( batch^ y* dy* )
+	ADD2 .state/y STZ2                   ( batch^ ; y += dy )
+	#01 SUB DUP ?&batch                  ( batch-1^ )
+	POP BRK
 
 ( dithering pattern for 2x2 pixels: )
 ( )
