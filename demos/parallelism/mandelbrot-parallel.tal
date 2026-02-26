@@ -36,8 +36,7 @@
 %YMIN   { #ecc7 } ( left edge   = -1.200 in 4.12 fixed-point )
 %YMAX   { #1333 } ( top edge    = +1.200 in 4.12 fixed-point )
 
-( BAND_SIZE = (YMAX-YMIN)/8 = 0x266C/8 = 0x04CD in 4.12 fixed-point )
-%BAND_SIZE { #04cd }
+%NTHREADS  { #000f } ( number of worker threads -- must be <= MAX_THREAD_COUNT in threads.c )
 
 |00 @System  &vector $2 &wst $1 &rst $1 &eaddr $2 &ecode $1 &pad $1 &r $2 &g $2 &b $2 &debug $1 &halt $1
 |20 @Screen  &vector $2 &width $2 &height $2 &auto $1 &pad $1 &x $2 &y $2 &addr $2 &pixel $1 &sprite $1
@@ -67,17 +66,18 @@
 	( Without a non-zero vector SDL_WaitEvent blocks indefinitely.     )
 	;on-frame .Screen/vector DEO2
 
-	( Spawn all 8 workers, passing band index 0-7 in a1.                )
-	( threads.c copies a1 into r0 before uxn_eval, so the worker reads  )
-	( its band index with ".Threads/r0 DEI2".                           )
-	;worker .Threads/a0 DEO2  #0000 .Threads/a1 DEO2  #0000 .Threads/a2 DEO2  #01 .Threads/cmd DEO
-	;worker .Threads/a0 DEO2  #0001 .Threads/a1 DEO2  #0000 .Threads/a2 DEO2  #01 .Threads/cmd DEO
-	;worker .Threads/a0 DEO2  #0002 .Threads/a1 DEO2  #0000 .Threads/a2 DEO2  #01 .Threads/cmd DEO
-	;worker .Threads/a0 DEO2  #0003 .Threads/a1 DEO2  #0000 .Threads/a2 DEO2  #01 .Threads/cmd DEO
-	;worker .Threads/a0 DEO2  #0004 .Threads/a1 DEO2  #0000 .Threads/a2 DEO2  #01 .Threads/cmd DEO
-	;worker .Threads/a0 DEO2  #0005 .Threads/a1 DEO2  #0000 .Threads/a2 DEO2  #01 .Threads/cmd DEO
-	;worker .Threads/a0 DEO2  #0006 .Threads/a1 DEO2  #0000 .Threads/a2 DEO2  #01 .Threads/cmd DEO
-	;worker .Threads/a0 DEO2  #0007 .Threads/a1 DEO2  #0000 .Threads/a2 DEO2  #01 .Threads/cmd DEO
+	( Spawn NTHREADS workers, passing band index 0..(NTHREADS-1) in a1.  )
+	( threads.c copies a1 into r0 before uxn_eval, so the worker reads   )
+	( its band index with ".Threads/r0 DEI2".                            )
+	#0000
+	&spawn-loop
+		;worker .Threads/a0 DEO2
+		DUP2    .Threads/a1 DEO2  ( band index )
+		#0000   .Threads/a2 DEO2
+		#01 .Threads/cmd DEO
+		INC2
+		DUP2 NTHREADS NEQ2 ?&spawn-loop
+	POP2
 
 	BRK
 
@@ -87,13 +87,14 @@
 @width  WIDTH  SCALE MUL2 JMP2r
 @height HEIGHT SCALE MUL2 JMP2r
 
-( === SINGLE WORKER (handles all 8 bands) ===                         )
-( Band index n (0-7) arrives in r0, placed there from a1 by           )
-( threads.c before uxn_eval. The worker derives:                      )
-(   ystart    = YMIN + n * BAND_SIZE  (BAND_SIZE = (YMAX-YMIN)/8)    )
-(   yend      = ystart + BAND_SIZE                                    )
-(   screen_y  = n * 0x0080           (128 px per band = 64 rows * 2) )
-( Worker 7's yend overshoots YMAX by at most 1 dy step (imperceptible) )
+( === SINGLE WORKER (handles all bands) ===                           )
+( Band index n arrives in r0, placed there from a1 by threads.c.     )
+( All geometry is derived at runtime from NTHREADS so changing that   )
+( single macro is all that is needed to alter the thread count.       )
+(   band_size  = (YMAX - YMIN) / NTHREADS  in 4.12 fixed-point       )
+(   ystart     = YMIN + n * band_size                                 )
+(   yend       = ystart + band_size                                   )
+(   screen_y   = n * (screen_height / NTHREADS)                      )
 
 @worker
 	#ff .Threads/uselocalstorage DEO
@@ -101,19 +102,24 @@
 	XMAX XMIN SUB2 width  DIV2 .state/dx STZ2
 	YMAX YMIN SUB2 height DIV2 .state/dy STZ2
 
-	( read band index from r0 -- set from a1 by the thread runtime )
-	.Threads/r0 DEI2             ( -- n )
-	DUP2                         ( -- n n )
+	( read band index n from r0 )
+	.Threads/r0 DEI2                  ( -- n )
 
-	( ystart = YMIN + n * BAND_SIZE )
-	BAND_SIZE MUL2 YMIN ADD2         ( -- n ystart )
-	DUP2 .state/y STZ2              ( -- n ystart )
+	( band_size = (YMAX-YMIN) / NTHREADS; duplicate so we have it for yend too )
+	YMAX YMIN SUB2 NTHREADS DIV2     ( -- n bs )
+	DUP2 STH2                        ( -- n bs | bs )
 
-	( yend = ystart + BAND_SIZE )
-	BAND_SIZE ADD2 .state/yend STZ2  ( -- n )
+	( ystart = YMIN + n * band_size )
+	( OVR2 copies n from below bs: (n bs n); MUL2 pops n and bs giving n*bs )
+	OVR2 MUL2 YMIN ADD2              ( -- n ystart | bs )
+	DUP2 .state/y STZ2               ( -- n ystart | bs )
 
-	( screen_y = n * 0x0080 )
-	#0080 MUL2 .Screen/y DEO2
+	( yend = ystart + band_size )
+	STH2r ADD2 .state/yend STZ2      ( -- n )
+
+	( screen_y = n * (screen_height / NTHREADS) )
+	.Screen/height DEI2 NTHREADS DIV2  ( -- n rows_per_band )
+	MUL2 .Screen/y DEO2
 	#0000 .Screen/x DEO2
 
 	&loop
