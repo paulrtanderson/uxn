@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <pthread.h>
 
 #include "../uxn.h"
 #include "screen.h"
@@ -15,6 +16,11 @@ WITH REGARD TO THIS SOFTWARE.
 */
 
 UxnScreen uxn_screen;
+
+/* Protects fg[], bg[], and the dirty rect (x1/y1/x2/y2).
+   Held only during actual buffer writes and screen_redraw, not during
+   register-setup DEO calls, so contention is minimal. */
+static pthread_mutex_t screen_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #define MAR(x) (x + 0x8)
 #define MAR2(x) (x + 0x10)
@@ -95,6 +101,7 @@ void
 screen_redraw(void)
 {
 	int i, x, y, k, l;
+	pthread_mutex_lock(&screen_mutex);
 	for(y = uxn_screen.y1; y < uxn_screen.y2; y++) {
 		int ys = y * uxn_screen.scale;
 		for(x = uxn_screen.x1, i = MAR(x) + MAR(y) * MAR2(uxn_screen.width); x < uxn_screen.x2; x++, i++) {
@@ -108,11 +115,13 @@ screen_redraw(void)
 	}
 	uxn_screen.x1 = uxn_screen.y1 = 9999;
 	uxn_screen.x2 = uxn_screen.y2 = 0;
+	pthread_mutex_unlock(&screen_mutex);
 }
 
-/* screen registers */
+/* screen registers - thread-local so each thread has its own independent
+   drawing cursor without any userland synchronisation required. */
 
-static int rX, rY, rA, rMX, rMY, rMA, rML, rDX, rDY;
+static __thread int rX, rY, rA, rMX, rMY, rMA, rML, rDX, rDY;
 
 Uint8
 screen_dei(Uint8 addr)
@@ -162,18 +171,22 @@ screen_deo(Uint8 addr)
 				y1 = 0, y2 = rY;
 			else
 				y1 = rY, y2 = uxn_screen.height;
+			pthread_mutex_lock(&screen_mutex);
 			screen_change(x1, y1, x2, y2);
 			x1 = MAR(x1), y1 = MAR(y1);
 			hor = MAR(x2) - x1, ver = MAR(y2) - y1;
 			for(ay = y1 * len, by = ay + ver * len; ay < by; ay += len)
 				for(ax = ay + x1, bx = ax + hor; ax < bx; ax++)
 					layer[ax] = color;
+			pthread_mutex_unlock(&screen_mutex);
 		}
 		/* pixel mode */
 		else {
+			pthread_mutex_lock(&screen_mutex);
 			if(rX >= 0 && rY >= 0 && rX < len && rY < uxn_screen.height)
 				layer[MAR(rX) + MAR(rY) * len] = color;
 			screen_change(rX, rY, rX + 1, rY + 1);
+			pthread_mutex_unlock(&screen_mutex);
 			if(rMX) rX++;
 			if(rMY) rY++;
 		}
@@ -189,6 +202,7 @@ screen_deo(Uint8 addr)
 		int hmar2 = MAR2(uxn_screen.height);
 		int i, x1, x2, y1, y2, ax, ay, qx, qy, x = rX, y = rY;
 		Uint8 *layer = ctrl & 0x40 ? uxn_screen.fg : uxn_screen.bg;
+		pthread_mutex_lock(&screen_mutex);
 		if(ctrl & 0x80) {
 			int addr_incr = rMA << 2;
 			for(i = 0; i <= rML; i++, x += dyx, y += dxy, rA += addr_incr) {
@@ -233,6 +247,7 @@ screen_deo(Uint8 addr)
 		else
 			y1 = rY, y2 = y;
 		screen_change(x1 - 8, y1 - 8, x2 + 8, y2 + 8);
+		pthread_mutex_unlock(&screen_mutex);
 		if(rMX) rX += rDX * fx;
 		if(rMY) rY += rDY * fy;
 		return;
