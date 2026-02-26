@@ -143,7 +143,7 @@ static bool mutex_table_initialized = false;
 static CondTable cond_table = { NULL, 0 };
 static bool cond_table_initialized = false;
 
-#define MAX_THREAD_COUNT 8
+#define MAX_THREAD_COUNT 16
 static ThreadRecord thread_records[MAX_THREAD_COUNT];
 
 Uint8 *shared_ram_ptr;
