@@ -1,19 +1,7 @@
 ( mandelbrot-parallel.tal )
 ( )
 ( Renders a Mandelbrot set fractal from eight threads concurrently.   )
-( The Y range [YMIN, YMAX) and the screen rows [0, 1024) are split    )
-( into 8 equal horizontal bands, each drawn by one worker thread.     )
-( )
-( Band layout (worker, y-range, screen rows):                         )
-(   0: [YB0, YB1)  rows   0-127    )
-(   1: [YB1, YB2)  rows 128-255    )
-(   2: [YB2, YB3)  rows 256-383    )
-(   3: [YB3, YB4)  rows 384-511    )
-(   4: [YB4, YB5)  rows 512-639    )
-(   5: [YB5, YB6)  rows 640-767    )
-(   6: [YB6, YB7)  rows 768-895    )
-(   7: [YB7, YMAX) rows 896-1023   )
-( )
+
 ( Thread-safety notes:                                                )
 (   Screen cursor registers (rX, rY) are __thread-local in screen.c, )
 (   so each thread has its own independent cursor.                    )
@@ -25,10 +13,9 @@
 (   Threads/uselocalstorage is set, giving each thread private        )
 (   copies of state (y, dx, dy) and evaluate scratch space.          )
 ( )
-( The evaluate function uses STZ2/LDZ2 instead of STR2/LDR2 to avoid )
-( the data race of two threads writing into the shared code-stream.   )
+( The evaluate function uses STZ2/LDZ2 instead of STR2/LDR2 which the original version used )
 
-%SCALE  { #0020 } ( scale factor = 32 )
+%SCALE  { #0014 } ( scale factor = 20 )
 %WIDTH  { #0015 } ( base logical width = 21 )
 %HEIGHT { #0010 } ( base logical height = 16 )
 %XMIN   { #de69 } ( left edge   = -2.100 in 4.12 fixed-point )
@@ -36,15 +23,16 @@
 %YMIN   { #ecc7 } ( left edge   = -1.200 in 4.12 fixed-point )
 %YMAX   { #1333 } ( top edge    = +1.200 in 4.12 fixed-point )
 
-%NTHREADS  { #000f } ( number of worker threads -- must be <= MAX_THREAD_COUNT in threads.c )
+%NTHREADS  { #0008 } ( number of worker threads -- must be <= MAX_THREAD_COUNT in threads.c )
+%DELAY     { #2000 } ( busy-loop iterations per pixel; increase to slow workers down )
 
 |00 @System  &vector $2 &wst $1 &rst $1 &eaddr $2 &ecode $1 &pad $1 &r $2 &g $2 &b $2 &debug $1 &halt $1
 |20 @Screen  &vector $2 &width $2 &height $2 &auto $1 &pad $1 &x $2 &y $2 &addr $2 &pixel $1 &sprite $1
 |d0 @Threads &cmd $1 &errno $1 &a0 $2 &a1 $2 &a2 $2 &r0 $2 &uselocalstorage $1
 
-( Zero-page -- LDZ/STZ redirect to per-thread bank when uselocalstorage != 0 )
+( Zero-page -- some space in the zero page thread local for zero page stuff )
 |80 @state   &y $2 &dx $2 &dy $2 &yend $2  ( per-row rendering state + band end )
-|88 @scratch &x1 $2 &y1 $2 &x2 $2 &y2 $2  ( evaluate temporaries )
+|88 @scratch &x1 $2 &y1 $2 &x2 $2 &y2 $2  ( temporaries )
 
 ( === PROGRAM ENTRY POINT === )
 |0100
@@ -63,7 +51,8 @@
 
 	( Minimal frame handler keeps SDL event loop ticking at 60hz so   )
 	( screen_changed()/screen_redraw()/emu_redraw() fire each frame.   )
-	( Without a non-zero vector SDL_WaitEvent blocks indefinitely.     )
+    ( Without a non-zero vector SDL_WaitEvent blocks indefinitely.     )
+    ( this might be a little bit cursed but this is the first thing I thought of   )
 	;on-frame .Screen/vector DEO2
 
 	( Spawn NTHREADS workers, passing band index 0..(NTHREADS-1) in a1.  )
@@ -71,10 +60,8 @@
 	( its band index with ".Threads/r0 DEI2".                            )
 	#0000
 	&spawn-loop
-		;worker .Threads/a0 DEO2
-		DUP2    .Threads/a1 DEO2  ( band index )
-		#0000   .Threads/a2 DEO2
-		#01 .Threads/cmd DEO
+		;worker OVR2 #0000 thread-create  ( entry=;worker arg=i flags=0 -- tid status )
+		POP POP2                           ( discard returned tid and status )
 		INC2
 		DUP2 NTHREADS NEQ2 ?&spawn-loop
 	POP2
@@ -94,7 +81,7 @@
 (   band_size  = (YMAX - YMIN) / NTHREADS  in 4.12 fixed-point       )
 (   ystart     = YMIN + n * band_size                                 )
 (   yend       = ystart + band_size                                   )
-(   screen_y   = n * (screen_height / NTHREADS)                      )
+(   screen_y   = n * 2 * floor(HEIGHT*SCALE / NTHREADS)               )
 
 @worker
 	#ff .Threads/uselocalstorage DEO
@@ -117,8 +104,17 @@
 	( yend = ystart + band_size )
 	STH2r ADD2 .state/yend STZ2      ( -- n )
 
-	( screen_y = n * (screen_height / NTHREADS) )
-	.Screen/height DEI2 NTHREADS DIV2  ( -- n rows_per_band )
+	( if last thread, clamp yend to YMAX so rounding doesn't leave a gap )
+	DUP2 NTHREADS #0001 SUB2 NEQ2 ?&not-last
+	YMAX .state/yend STZ2
+	&not-last
+
+	( screen_y = n * 2 * floor(HEIGHT*SCALE / NTHREADS)                  )
+	( Using the logical height (HEIGHT*SCALE) rather than Screen/height   )
+	( (HEIGHT*SCALE/2) keeps the factor-of-2 row stride in sync with the  )
+	( integer division, preventing gaps when SCALE%NTHREADS != 0.         )
+	height NTHREADS DIV2   ( rows_per_band = floor(HEIGHT*SCALE/NTHREADS) )
+	DUP2 ADD2              ( 2 * rows_per_band, matching the 2px row step )
 	MUL2 .Screen/y DEO2
 	#0000 .Screen/x DEO2
 
@@ -131,6 +127,8 @@
 		&xloop
 			OVR2 OVR2 SWP2 evaluate
 			draw-px
+			( busy-delay )
+			DELAY &busy #0001 SUB2 DUP2 ORA ?&busy POP2
 			.state/dx LDZ2 ADD2
 			DUP2 #8000 ADD2 XMAX #8000 ADD2 LTH2 ?&xloop
 		POP2 POP2
@@ -248,3 +246,110 @@
 @inc1 INC2 JMP2r
 @sub1 #0001 SUB2 JMP2r
 @sub2 #0002 SUB2 JMP2r
+
+( === THREAD WRAPPERS === )
+( thread-create: ( entry arg flags -- tid|err status )                )
+( Spawns a new thread at `entry`. threads.c writes `arg` into r0      )
+( before uxn_eval, so the worker reads its argument via .Threads/r0   )
+( DEI2. flags: 0=joinable, 1=detached. Returns tid (or error) and     )
+( status byte (0=ok, non-zero=error).                                  )
+@thread-create
+	.Threads/a2 DEO2
+	.Threads/a1 DEO2
+	.Threads/a0 DEO2
+	#01 .Threads/cmd DEO
+	.Threads/r0 DEI2
+	.Threads/errno DEI
+	JMP2r
+
+( thread-join: ( tid -- exit|err status )                             )
+( Waits for thread `tid` to finish. Returns exit code and status.     )
+@thread-join
+	.Threads/a0 DEO2
+	#02 .Threads/cmd DEO
+	.Threads/r0 DEI2
+	.Threads/errno DEI
+	JMP2r
+
+( mutex-create: ( -- mid|err status )                                 )
+( Creates a new mutex and returns its handle and status.              )
+@mutex-create
+	#0000 .Threads/a0 DEO2
+	#04 .Threads/cmd DEO
+	.Threads/r0 DEI2
+	.Threads/errno DEI
+	JMP2r
+
+( mutex-destroy: ( mid -- status )                                    )
+@mutex-destroy
+	.Threads/a0 DEO2
+	#05 .Threads/cmd DEO
+	.Threads/errno DEI
+	JMP2r
+
+( mutex-lock: ( mid -- status )                                       )
+@mutex-lock
+	.Threads/a0 DEO2
+	#06 .Threads/cmd DEO
+	.Threads/errno DEI
+	JMP2r
+
+( mutex-unlock: ( mid -- status )                                     )
+@mutex-unlock
+	.Threads/a0 DEO2
+	#07 .Threads/cmd DEO
+	.Threads/errno DEI
+	JMP2r
+
+( cond-create: ( -- cid|err status )                                  )
+( Creates a new condition variable and returns its handle and status. )
+@cond-create
+	#09 .Threads/cmd DEO
+	.Threads/r0 DEI2
+	.Threads/errno DEI
+	JMP2r
+
+( cond-destroy: ( cid -- status )                                     )
+@cond-destroy
+	.Threads/a0 DEO2
+	#0a .Threads/cmd DEO
+	.Threads/errno DEI
+	JMP2r
+
+( cond-wait: ( cid mid -- status )                                    )
+( mutex must be locked by caller; atomically released while waiting.  )
+@cond-wait
+	.Threads/a1 DEO2
+	.Threads/a0 DEO2
+	#0b .Threads/cmd DEO
+	.Threads/errno DEI
+	JMP2r
+
+( cond-signal: ( cid -- status )                                      )
+( Wakes one thread waiting on the condition variable.                 )
+@cond-signal
+	.Threads/a0 DEO2
+	#0c .Threads/cmd DEO
+	.Threads/errno DEI
+	JMP2r
+
+( cond-broadcast: ( cid -- status )                                   )
+( Wakes all threads waiting on the condition variable.                )
+@cond-broadcast
+	.Threads/a0 DEO2
+	#0d .Threads/cmd DEO
+	.Threads/errno DEI
+	JMP2r
+
+( cond-timedwait: ( cid mid timeout_ms -- result status )             )
+( Like cond-wait but with a relative ms timeout. result: 0=signalled, )
+( 1=timed out, 2=invalid args, 3=clock failure. STATUS=0 in both      )
+( signal and timeout cases; check result to distinguish them.         )
+@cond-timedwait
+	.Threads/a2 DEO2
+	.Threads/a1 DEO2
+	.Threads/a0 DEO2
+	#0e .Threads/cmd DEO
+	.Threads/r0 DEI2
+	.Threads/errno DEI
+	JMP2r

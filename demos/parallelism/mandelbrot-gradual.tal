@@ -19,7 +19,7 @@
 ( #0010   336x256        672x512   )
 ( #0020   672x512       1344x1024  )
 
-%SCALE  { #0020 } ( scale factor = 16 )
+%SCALE  { #0014 } ( scale factor = 20 )
 %WIDTH  { #0015 } ( base logical width = 21 )
 %HEIGHT { #0010 } ( base logical height = 16 )
 %XMIN   { #de69 } ( left edge of view   = -2.100 in fixed-point )
@@ -76,7 +76,8 @@
 ( Draw several rows of the Mandelbrot set each frame.              )
 ( ROWS-PER-FRAME controls how many rows we compute before we let   )
 ( the screen refresh. Higher = faster rendering, lower = smoother. )
-%ROWS-PER-FRAME { #0004 } ( 4 rows per frame )
+%ROWS-PER-FRAME { #0004 } ( 2 rows per frame )
+%DELAY          { #0001 } ( busy-loop iterations per pixel; increase to slow down )
 
 ( Called once per screen refresh. Draws ROWS-PER-FRAME rows, then yields. )
 @on-frame
@@ -99,6 +100,8 @@
 		OVR2 OVR2 SWP2 evaluate
 		( Draw a 2x2 dithered pixel based on the iteration count )
 		draw-px
+		( busy-delay )
+		DELAY &busy #0001 SUB2 DUP2 ORA ?&busy POP2
 		( Advance x by one step in the complex plane )
 		.state/dx LDZ2 ADD2
 		( Check if x has passed the right edge [same signed comparison trick] )
