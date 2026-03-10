@@ -1,0 +1,279 @@
+( mandelbrot.tal )
+( )
+( by alderwick and d_m )
+( )
+( Renders a Mandelbrot set fractal using 4.12 fixed-point arithmetic. )
+( Numbers are stored as 16-bit shorts where the top 4 bits are the  )
+( integer part and the lower 12 bits are the fractional part.        )
+( For example, #1000 = 1.0, #2000 = 2.0, #0800 = 0.5, etc.         )
+( )
+( The SCALE macro controls resolution. Larger SCALE = more pixels.   )
+( The logical grid is WIDTH x HEIGHT; actual screen is 2x that       )
+( because each logical pixel is drawn as a 2x2 dithered block.       )
+( )
+( SCALE  LOGICAL-GRID  SCREEN-SIZE )
+( #0001     21x16          42x32   )
+( #0002     42x32          84x64   )
+( #0004     84x64        168x128   )
+( #0008   168x128        336x256   )
+( #0010   336x256        672x512   )
+( #0020   672x512       1344x1024  )
+
+%SCALE  { #0014 } ( scale factor = 20 )
+%WIDTH  { #0015 } ( base logical width = 21 )
+%HEIGHT { #0010 } ( base logical height = 16 )
+%XMIN   { #de69 } ( left edge of view   = -2.100 in fixed-point )
+%XMAX   { #0b33 } ( right edge of view  =  0.700 in fixed-point )
+%YMIN   { #ecc7 } ( bottom edge of view = -1.200 in fixed-point )
+%YMAX   { #1333 } ( top edge of view    =  1.200 in fixed-point )
+
+( Device memory layout - these map hardware I/O ports to named fields )
+|00 @System &vector $2 &wst $1 &rst $1 &eaddr $2 &ecode $1 &pad $1 &r $2 &g $2 &b $2 &debug $1 &halt $1
+|20 @Screen &vector $2 &width $2 &height $2 &auto $1 &pad $1 &x $2 &y $2 &addr $2 &pixel $1 &sprite $1
+
+( Global state stored in zero-page memory )
+( y: current y-coordinate in the complex plane )
+( dx: step size between adjacent x pixels in the complex plane )
+( dy: step size between adjacent y pixels in the complex plane )
+|80 @state &y $2 &dx $2 &dy $2
+
+( === PROGRAM ENTRY POINT === )
+|0100
+
+	( Set the color palette: red, green, blue channels )
+	#00ff .System/r DEO2
+	#0ff0 .System/g DEO2
+	#0f0f .System/b DEO2
+
+	( Set the screen size in pixels. We shift left by 16 because )
+	( each logical pixel becomes a 2x2 block on screen.          )
+	width #10 SFT2 .Screen/width  DEO2
+	height #10 SFT2 .Screen/height DEO2
+
+	( Compute how far apart each pixel is in the complex plane. )
+	( dx = [xmax - xmin] / width, dy = [ymax - ymin] / height  )
+	XMAX XMIN SUB2 width DIV2 .state/dx STZ2
+	YMAX YMIN SUB2 height DIV2 .state/dy STZ2
+
+	( Start scanning from the top of the view )
+	YMIN .state/y STZ2
+
+	( Tell the screen device to auto-increment x after each pixel draw )
+	[ LIT2 01 -Screen/auto ] DEO
+
+	( Register the on-frame handler so we render progressively, row by row )
+	;on-frame .Screen/vector DEO2
+	BRK
+
+( Returns the logical pixel width: WIDTH * SCALE )
+@width
+    WIDTH SCALE MUL2 JMP2r
+
+( Returns the logical pixel height: HEIGHT * SCALE )
+@height
+    HEIGHT SCALE MUL2 JMP2r
+
+( Draw several rows of the Mandelbrot set each frame.              )
+( ROWS-PER-FRAME controls how many rows we compute before we let   )
+( the screen refresh. Higher = faster rendering, lower = smoother. )
+%ROWS-PER-FRAME { #0004 } ( 2 rows per frame )
+%DELAY          { #0001 } ( busy-loop iterations per pixel; increase to slow down )
+
+( Called once per screen refresh. Draws ROWS-PER-FRAME rows, then yields. )
+@on-frame
+	ROWS-PER-FRAME              ( start with batch counter )
+	&batch
+	( Check if we've gone past the bottom edge of the view )
+	( We add #8000 to both sides to convert signed comparison to unsigned )
+	.state/y LDZ2
+	DUP2 #8000 ADD2
+	YMAX #8000 ADD2
+	LTH2 ?&row                  ( if y < ymax, draw another row )
+	POP2 POP                    ( otherwise, clear screen and restart )
+	( clear both screen layers )
+	#0000 DUP2 .Screen/x DEO2 .Screen/y DEO2
+	#80 .Screen/pixel DEO
+	#c0 .Screen/pixel DEO
+	( reset drawing state to top of view )
+	YMIN .state/y STZ2
+	#0000 DUP2 .Screen/x DEO2 .Screen/y DEO2
+	[ LIT2 01 -Screen/auto ] DEO
+	BRK
+	&row
+	#0000 .Screen/x DEO2        ( reset screen x to left edge )
+	XMIN                         ( start x at the left side of the complex plane )
+	&xloop
+		( Evaluate the Mandelbrot iteration count at point [x, y] )
+		OVR2 OVR2 SWP2 evaluate
+		( Draw a 2x2 dithered pixel based on the iteration count )
+		draw-px
+		( busy-delay )
+		DELAY &busy #0001 SUB2 DUP2 ORA ?&busy POP2
+		( Advance x by one step in the complex plane )
+		.state/dx LDZ2 ADD2
+		( Check if x has passed the right edge [same signed comparison trick] )
+		DUP2 #8000 ADD2
+		XMAX #8000 ADD2
+		LTH2 ?&xloop               ( keep going if x < xmax )
+	POP2 POP2                    ( clean up x and y from the stack )
+	.Screen/y ;inc2 adjust       ( move screen y down by 2 pixels [2x2 blocks] )
+	.state/y LDZ2 .state/dy LDZ2 ( advance y in the complex plane by dy )
+	ADD2 .state/y STZ2
+	#01 SUB DUP ?&batch          ( decrement batch counter; loop if rows remain )
+	POP BRK
+
+( Draws a 2x2 dithered pixel block from a single iteration count.   )
+( Dithering gives us 5 visual levels [0-4] from just 2 colors by    )
+( filling in different sub-pixels of the 2x2 block:                 )
+( )
+( level 0:  |. .|   level 1:  |# .|   level 2:  |# .|             )
+(           |. .|              |. .|              |. #|             )
+( )
+( level 3:  |# #|   level 4:  |# #|                                )
+(           |. #|              |# #|                                )
+( )
+( The four quadrants use offsets [p+3, p+1, p+0, p+2] divided by 4 )
+( to decide whether each sub-pixel is on or off.                    )
+@draw-px
+	( Prepare the four offset values from the iteration count )
+	INCk INCk INC
+	( Draw top-left and top-right quadrants )
+	draw-quad draw-quad
+	( Move screen cursor down one pixel and back two pixels )
+	.Screen/y ;inc1 adjust
+	.Screen/x ;sub2 adjust
+	( Prepare remaining offsets, draw bottom-left and bottom-right )
+	INCk INC SWP
+	draw-quad draw-quad
+	( Move screen cursor back up to restore y position )
+	.Screen/y ;sub1 !adjust
+
+( Draw one sub-pixel of a 2x2 block. Divides the offset by 4 )
+( to get a color value [0 or 1] and writes it to the screen.  )
+@draw-quad
+	#02 SFT .Screen/pixel DEO JMP2r
+
+( Evaluate the Mandelbrot function at complex point [x, y].              )
+( Returns an iteration count [0-31] indicating how quickly the point     )
+( escapes. The classic formula is: z = z^2 + c, where c = x + yi.       )
+( We iterate up to 32 times [#20 = 32]. If |z|^2 > 4 the point escapes. )
+( Lower counts = escaped quickly [outside the set, drawn lighter].       )
+( Higher counts = escaped slowly or didn't escape [in/near set, darker]. )
+@evaluate
+	( Initialize z = 0: set x1, y1, x2, y2 all to zero.        )
+	( x1/y1 = real/imaginary parts of z                         )
+	( x2/y2 = cached squares x1^2 and y1^2 [avoids recomputing] )
+	#0000 DUP2 ,&x1 STR2
+		  DUP2 ,&y1 STR2
+		  DUP2 ,&x2 STR2
+			   ,&y2 STR2
+	( Push max-iterations [#20 = 32] and counter [0] onto return stack )
+	LIT2r 2000
+	&loop
+		( Compute new y1 = 2 * x1 * y1 + y  [imaginary part of z^2 + c] )
+		[ LIT2 &x1 $2 ]
+		[ LIT2 &y1 $2 ]
+		smul2 DUP2 ADD2       ( multiply x1*y1, then double it )
+		OVR2 ADD2 ,&y1 STR2   ( add y to get new y1, store it )
+		( Compute new x1 = x2 - y2 + x  [real part of z^2 + c] )
+		SWP2 [ LIT2 &x2 $2 ]
+		[ LIT2 &y2 $2 ] SUB2   ( x1_squared - y1_squared )
+		OVR2 ADD2 ,&x1 STR2 SWP2 ( add x to get new x1, store it )
+		( Compute x1^2 and y1^2 for the escape check )
+		,&x1 LDR2 square       ( x1^2 )
+		DUP2 ,&x2 STR2         ( cache x1^2 in x2 )
+		,&y1 LDR2 square       ( y1^2 )
+		DUP2 ,&y2 STR2         ( cache y1^2 in y2 )
+		( Check escape: if x1^2 + y1^2 > 4.0 [#4000], point has escaped )
+		ADD2 #4000 GTH2 ?&end
+		( Increment iteration counter; keep looping if under max )
+		INCr GTHkr STHr ?&loop
+	&end
+	( Clean up and return the iteration count from the return stack )
+	POP2 POP2 NIPr STHr JMP2r
+
+( Check if a signed 16-bit number is non-negative [>= 0].    )
+( Returns the original value plus a flag: 1 if non-negative. )
+( Works by checking if the value is less than #8000, i.e.     )
+( the high bit [sign bit] is not set.                         )
+@non-negative
+	DUP2 #8000 LTH2 JMP2r
+
+( Multiply two signed 4.12 fixed-point numbers.                      )
+( Strategy: track the sign separately, multiply the absolute values,  )
+( then negate the result if exactly one input was negative.            )
+( The sign is tracked on the return stack [1 = positive, 0 = negative] )
+@smul2
+	( Start with sign = positive. If b is negative, negate b and flip sign )
+	LIT2r 0001 non-negative ?{ negate SWPr }
+	( If a is negative, negate a and flip sign )
+	SWP2 non-negative ?{ negate SWPr }
+	( Multiply the now-positive values, then negate result if sign says so )
+	smul2-pos STHr ?{ negate } POPr JMP2r
+
+( Multiply two non-negative fixed-point numbers.                       )
+( Each 16-bit number has a high byte [integer-ish] and low byte         )
+( [fractional-ish]. We split each into two parts and cross-multiply:    )
+( )
+(   a = a_hi/16 + a_lo/4096                                            )
+(   b = b_hi/16 + b_lo/4096                                            )
+(   a * b = [a_hi * b_hi] << 4                   ... main term          )
+(         + [a_lo * b_hi + a_hi * b_lo] >> 4      ... cross terms       )
+(         + [a_lo * b_lo] >> 24                   ... too tiny, ignored  )
+( )
+( The result is clamped to #7fff to avoid overflow into the sign bit.   )
+@smul2-pos
+	( Split b into high and low shorts, then split a the same way )
+	aerate ROT2 aerate
+	( Cross-multiply and accumulate: a_lo*b_hi + a_hi*b_lo [on return stack] )
+	STH2 ROT2k STH2 MUL2r
+	MUL2 STH2 ADD2r
+	( Compute the main term: a_hi * b_hi, shifted and clamped )
+	NIP2 MUL2 #07ff min #40 SFT2
+	( Add the cross terms [shifted right by 4] to the main term )
+	STH2r #04 SFT2 ADD2
+	( Clamp result to max positive value )
+	#7fff !min
+
+( Square a fixed-point number. Equivalent to calling smul2 with )
+( the same value twice, but optimized since we know both inputs  )
+( are the same. Squaring is always positive, so we just take the )
+( absolute value first.                                          )
+@square
+	( Make the value non-negative [result is the same either way] )
+	non-negative ?{ negate }
+	( Split into high and low bytes )
+	aerate
+	( Compute the cross term: 2 * a_hi * a_lo [shift by 3 = multiply by 8/... )
+	OVR2 MUL2 #03 SFT2 SWP2
+	( Compute the main term: a_hi * a_hi, clamped and shifted )
+	DUP2 MUL2 #07ff min #40 SFT2
+	( Add them together and clamp )
+	ADD2 #7fff !min
+
+( Helper: read a device port, apply a function to the value, write it back. )
+( Used to do things like "Screen/y += 2" without temporary variables.        )
+( Takes: device-port-address, pointer-to-function                            )
+@adjust
+	STH2 DEI2k STH2r JSR2 ROT DEO2 JMP2r
+
+( Return the smaller of two non-negative 16-bit numbers. )
+@min
+	GTH2k [ JMP SWP2 ] NIP2 JMP2r
+
+( Split a 16-bit short into two 16-bit values: one for each byte.  )
+( e.g. #AB_CD becomes #00AB and #00CD. Used to set up              )
+( cross-multiplication in the fixed-point multiply routines.       )
+@aerate
+	SWP #0000 ROT SWP2 SWP JMP2r
+
+( Negate a fixed-point number [compute 0 - x]. )
+( Note: does not work correctly for #8000 [most negative value]. )
+@negate
+	DUP2k EOR2 SWP2 SUB2 JMP2r
+
+( Small arithmetic helpers used with the 'adjust' function above )
+@inc2 INC2          ( add 2 )
+@inc1 INC2 JMP2r    ( add 1 )
+@sub1 #0001 SUB2 JMP2r ( subtract 1 )
+@sub2 #0002 SUB2 JMP2r ( subtract 2 )

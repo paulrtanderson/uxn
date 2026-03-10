@@ -100,17 +100,20 @@
 	( read band index n from r0 )
 	.Threads/r0 DEI2                  ( -- n )
 
-	( band_size = (YMAX-YMIN) / NTHREADS; duplicate so we have it for yend too )
+	( band_size = (YMAX-YMIN) / NTHREADS )
 	YMAX YMIN SUB2 NTHREADS DIV2     ( -- n bs )
-	DUP2 STH2                        ( -- n bs | bs )
 
 	( ystart = YMIN + n * band_size )
 	( OVR2 copies n from below bs: (n bs n); MUL2 pops n and bs giving n*bs )
-	OVR2 MUL2 YMIN ADD2              ( -- n ystart | bs )
-	DUP2 .state/y STZ2               ( -- n ystart | bs )
+	OVR2 MUL2 YMIN ADD2              ( -- n ystart )
+	DUP2 .state/y STZ2               ( -- n ystart )
 
-	( yend = ystart + band_size )
-	STH2r ADD2 .state/yend STZ2      ( -- n )
+	( yend = ystart + rows_per_band * dy                                   )
+	( band_size/dy has a remainder, so using band_size directly would make )
+	( each thread render one extra row that bleeds into the next band.     )
+	( Multiply the integer row count by dy to get an aligned yend instead. )
+	height NTHREADS DIV2 .state/dy LDZ2 MUL2 ADD2
+	.state/yend STZ2                  ( -- n )
 
 	( if last thread, clamp yend to YMAX so rounding doesn't leave a gap )
 	DUP2 NTHREADS #0001 SUB2 NEQ2 ?&not-last
