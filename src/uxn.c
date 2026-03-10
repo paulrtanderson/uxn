@@ -47,7 +47,7 @@ uxn_eval(Uint16 pc)
 {
 	unsigned int a, b, c, x[2], y[2], z[2], step;
 	if(!pc || uxn.dev[0x0f]) return 0;
-	for(step = STEP_MAX; step; step--) {
+	while (1) {
 		switch(uxn.ram[pc++]) {
 		/* BRK */ case 0x00: return 1;
 		/* JCI */ case 0x20: if(DEC(wst)) { JMI break; } pc += 2; break;

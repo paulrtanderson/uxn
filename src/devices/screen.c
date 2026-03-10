@@ -36,10 +36,6 @@ static Uint8 blending[4][16] = {
 int
 screen_changed(void)
 {
-	clamp(uxn_screen.x1, 0, uxn_screen.width);
-	clamp(uxn_screen.y1, 0, uxn_screen.height);
-	clamp(uxn_screen.x2, 0, uxn_screen.width);
-	clamp(uxn_screen.y2, 0, uxn_screen.height);
 	return uxn_screen.x2 > uxn_screen.x1 &&
 		uxn_screen.y2 > uxn_screen.y1;
 }
@@ -102,6 +98,10 @@ screen_redraw(void)
 {
 	int i, x, y, k, l;
 	pthread_mutex_lock(&screen_mutex);
+	clamp(uxn_screen.x1, 0, uxn_screen.width);
+	clamp(uxn_screen.y1, 0, uxn_screen.height);
+	clamp(uxn_screen.x2, 0, uxn_screen.width);
+	clamp(uxn_screen.y2, 0, uxn_screen.height);
 	for(y = uxn_screen.y1; y < uxn_screen.y2; y++) {
 		int ys = y * uxn_screen.scale;
 		for(x = uxn_screen.x1, i = MAR(x) + MAR(y) * MAR2(uxn_screen.width); x < uxn_screen.x2; x++, i++) {
