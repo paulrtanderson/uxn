@@ -35,7 +35,7 @@
 ( y: current y-coordinate in the complex plane )
 ( dx: step size between adjacent x pixels in the complex plane )
 ( dy: step size between adjacent y pixels in the complex plane )
-|80 @state &y $2 &dx $2 &dy $2
+|80 @state &y $2 &dx $2 &dy $2 &renders $2
 
 ( === PROGRAM ENTRY POINT === )
 |0100
@@ -76,8 +76,8 @@
 ( Draw several rows of the Mandelbrot set each frame.              )
 ( ROWS-PER-FRAME controls how many rows we compute before we let   )
 ( the screen refresh. Higher = faster rendering, lower = smoother. )
-%ROWS-PER-FRAME { #0004 } ( 2 rows per frame )
-%DELAY          { #0001 } ( busy-loop iterations per pixel; increase to slow down )
+%ROWS-PER-FRAME { #0004 } ( 4 rows per frame )
+%MAX-RENDERS    { #0005 } ( halt after this many complete renders )
 
 ( Called once per screen refresh. Draws ROWS-PER-FRAME rows, then yields. )
 @on-frame
@@ -89,7 +89,14 @@
 	DUP2 #8000 ADD2
 	YMAX #8000 ADD2
 	LTH2 ?&row                  ( if y < ymax, draw another row )
-	POP2 POP                    ( otherwise, clear screen and restart )
+	POP2 POP                    ( one render complete )
+	( increment render counter and check if done )
+	.state/renders LDZ2 INC2 DUP2 .state/renders STZ2
+	MAX-RENDERS LTH2 ?&restart
+	( max renders reached -- halt )
+	#01 .System/halt DEO
+	BRK
+	&restart
 	( clear both screen layers )
 	#0000 DUP2 .Screen/x DEO2 .Screen/y DEO2
 	#80 .Screen/pixel DEO
@@ -107,8 +114,6 @@
 		OVR2 OVR2 SWP2 evaluate
 		( Draw a 2x2 dithered pixel based on the iteration count )
 		draw-px
-		( busy-delay )
-		DELAY &busy #0001 SUB2 DUP2 ORA ?&busy POP2
 		( Advance x by one step in the complex plane )
 		.state/dx LDZ2 ADD2
 		( Check if x has passed the right edge [same signed comparison trick] )

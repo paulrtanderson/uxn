@@ -24,7 +24,7 @@
 %YMAX   { #1333 } ( top edge    = +1.200 in 4.12 fixed-point )
 
 %NTHREADS  { #0003 } ( number of worker threads -- must be <= MAX_THREAD_COUNT in threads.c )
-%DELAY     { #0002 } ( busy-loop iterations per pixel; increase to slow workers down )
+%MAX-RENDERS { #0005 } ( halt after this many complete renders )
 
 
 |00 @System  &vector $2 &wst $1 &rst $1 &eaddr $2 &ecode $1 &pad $1 &r $2 &g $2 &b $2 &debug $1 &halt $1
@@ -76,8 +76,12 @@
 
 	BRK
 
-( Minimal frame callback -- keeps SDL event loop alive at 60hz )
-@on-frame BRK
+( Frame callback -- keeps SDL event loop alive; checks if rendering is done )
+@on-frame
+	;render-count LDA2 MAX-RENDERS LTH2 ?&keep-going
+	#01 .System/halt DEO
+	&keep-going
+	BRK
 
 @width  WIDTH  SCALE MUL2 JMP2r
 @height HEIGHT SCALE MUL2 JMP2r
@@ -141,8 +145,6 @@
 		&xloop
 			OVR2 OVR2 SWP2 evaluate
 			draw-px
-			( busy-delay )
-			DELAY &busy #0001 SUB2 DUP2 ORA ?&busy POP2
 			.state/dx LDZ2 ADD2
 			DUP2 #8000 ADD2 XMAX #8000 ADD2 LTH2 ?&xloop
 		POP2 POP2
@@ -166,6 +168,10 @@
 	?&do-clear
 	!&after-clear
 	&do-clear
+	( serial thread increments shared render counter )
+	;use-global-storage JSR2
+	;render-count LDA2 INC2 ;render-count STA2
+	;use-local-storage JSR2
 	#0000 DUP2 .Screen/x DEO2 .Screen/y DEO2
 	#80 .Screen/pixel DEO
 	#c0 .Screen/pixel DEO
@@ -445,3 +451,4 @@
     JMP2r
 
 @barrier-id $2
+@render-count $2
