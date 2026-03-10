@@ -92,7 +92,7 @@
 (   screen_y   = n * 2 * floor(HEIGHT*SCALE / NTHREADS)               )
 
 @worker
-	#ff .Threads/uselocalstorage DEO
+	;use-local-storage JSR2
 	[ LIT2 01 -Screen/auto ] DEO
 	XMAX XMIN SUB2 width  DIV2 .state/dx STZ2
 	YMAX YMIN SUB2 height DIV2 .state/dy STZ2
@@ -255,6 +255,24 @@
 @sub1 #0001 SUB2 JMP2r
 @sub2 #0002 SUB2 JMP2r
 
+( === THREAD-LOCAL STORAGE WRAPPERS === )
+( In uxn.c, LDA/STA/LDZ/STZ all index into RAM at: )
+(   address + dev[0xDA] * PAGE_SIZE )
+( When dev[0xDA] == 0x00, reads/writes go to global shared RAM. )
+( When dev[0xDA] != 0x00, reads/writes go to an isolated )
+( per-thread memory bank, so each thread gets its own copy )
+( of the address space without affecting other threads. )
+( Writing #ff via DEO auto-selects the current thread's bank. )
+( Writing #00 via DEO switches back to global shared memory. )
+
+@use-local-storage ( -- )
+	#ff .Threads/uselocalstorage DEO
+	JMP2r
+
+@use-global-storage ( -- )
+	#00 .Threads/uselocalstorage DEO
+	JMP2r
+
 ( === THREAD WRAPPERS === )
 ( thread-create: ( entry arg flags -- tid|err status )                )
 ( Spawns a new thread at `entry`. threads.c writes `arg` into r0      )
@@ -362,11 +380,28 @@
 	.Threads/errno DEI
 	JMP2r
 
-( wait-at-barrier: ( barrier_location -- status )					  )
-( Simple barrier for synchronising threads. `barrier_location` is the )
-( address of a Barrier struct in the thread-local zero page. Each     )
-( thread calls this function with the same address to wait for all    )
-( threads to reach the barrier before any can proceed.                )
-( where barrier is defined as )
-( @Barrier &count $1 &total $1 &mutex $2 &cond $2 						
-@wait-at-barrier
+( barrier-create: ( count -- bid|err status )                          )
+( Creates a barrier for `count` threads. Returns handle and status.   )
+@barrier-create
+    .Threads/a0 DEO2
+    #0f .Threads/cmd DEO
+    .Threads/r0 DEI2
+    .Threads/errno DEI
+    JMP2r
+
+( barrier-destroy: ( bid -- status )                                   )
+@barrier-destroy
+    .Threads/a0 DEO2
+    #10 .Threads/cmd DEO
+    .Threads/errno DEI
+    JMP2r
+
+( barrier-wait: ( bid -- serial? status )                              )
+( Blocks until all threads reach the barrier. Returns serial?=1 for   )
+( exactly one thread (the "serial thread"), 0 for all others.         )
+@barrier-wait
+    .Threads/a0 DEO2
+    #11 .Threads/cmd DEO
+    .Threads/r0 DEI2
+    .Threads/errno DEI
+    JMP2r
