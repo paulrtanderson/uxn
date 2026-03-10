@@ -32,12 +32,11 @@
 |d0 @Threads &cmd $1 &errno $1 &a0 $2 &a1 $2 &a2 $2 &r0 $2 &uselocalstorage $1
 
 
+@Barrier &count $1 &total $1 &mutex $2 &cond $2
 
 ( Zero-page -- some space in the zero page thread local for zero page stuff )
-|e0 @state   &y $2 &dx $2 &dy $2 &yend $2  ( per-row rendering state + band end )
-|e8 @scratch &x1 $2 &y1 $2 &x2 $2 &y2 $2  ( temporaries )
-|f0 @Barrier &count $1 &total $1 &mutex $2 &cond $2 ( simple barrier for thread sync )
-
+|80 @state   &y $2 &dx $2 &dy $2 &yend $2  ( per-row rendering state + band end )
+|88 @scratch &x1 $2 &y1 $2 &x2 $2 &y2 $2  ( temporaries )
 
 ( === PROGRAM ENTRY POINT === )
 |0100
@@ -55,12 +54,12 @@
 	[ LIT2 01 -Screen/auto ] DEO
 
 	( initialise barrer )
-
+	
 
 	( Minimal frame handler keeps SDL event loop ticking at 60hz so   )
 	( screen_changed()/screen_redraw()/emu_redraw() fire each frame.   )
-    ( Without a non-zero vector SDL_WaitEvent blocks indefinitely.     )
-    ( this might be a little bit cursed but this is the first thing I thought of   )
+	( Without a non-zero vector SDL_WaitEvent blocks indefinitely.     )
+	( this might be a little bit cursed but this is the first thing I thought of   )
 	;on-frame .Screen/vector DEO2
 
 	( Spawn NTHREADS workers, passing band index 0..(NTHREADS-1) in a1.  )
@@ -178,7 +177,7 @@
 	DUP2 .scratch/x1 STZ2
 	DUP2 .scratch/y1 STZ2
 	DUP2 .scratch/x2 STZ2
-	     .scratch/y2 STZ2
+		 .scratch/y2 STZ2
 
 	( push max-iterations (#20=32) and counter (#00) onto return stack )
 	LIT2r 2000
@@ -317,14 +316,14 @@
 	.Threads/errno DEI
 	JMP2r
 
-( cond-destroy: ( cid -- status )                                     )
+( cond-destroy: ( cid -- status )										)
 @cond-destroy
 	.Threads/a0 DEO2
 	#0a .Threads/cmd DEO
 	.Threads/errno DEI
 	JMP2r
 
-( cond-wait: ( cid mid -- status )                                    )
+( cond-wait: ( cid mid -- status )										)
 ( mutex must be locked by caller; atomically released while waiting.  )
 @cond-wait
 	.Threads/a1 DEO2
@@ -349,6 +348,7 @@
 	.Threads/errno DEI
 	JMP2r
 
+
 ( cond-timedwait: ( cid mid timeout_ms -- result status )             )
 ( Like cond-wait but with a relative ms timeout. result: 0=signalled, )
 ( 1=timed out, 2=invalid args, 3=clock failure. STATUS=0 in both      )
@@ -362,11 +362,114 @@
 	.Threads/errno DEI
 	JMP2r
 
-( wait-at-barrier: ( barrier_location -- status )					  )
-( Simple barrier for synchronising threads. `barrier_location` is the )
-( address of a Barrier struct in the thread-local zero page. Each     )
-( thread calls this function with the same address to wait for all    )
-( threads to reach the barrier before any can proceed.                )
-( where barrier is defined as )
-( @Barrier &count $1 &total $1 &mutex $2 &cond $2 						
+
+( barrier-init: ( barrier* total -- status ) )
+( Initializes a barrier at barrier*. count := total, then creates mutex )
+( and cond and stores their handles into the struct.                    )
+@barrier-init
+	( stack: barrier* total )
+
+	( store total into count and total )
+	DUP                    ( barrier* total total )
+	OVR2 STA               ( barrier* total )        count = total
+
+	OVR2 #0001 ADD2 STA    ( barrier* )              total = total
+
+	( create mutex )
+	JSR2 mutex-create      ( barrier* mid status )
+	DUP #00 NEQ ,&barrier-init-mutex-fail JCN
+	POP                    ( barrier* mid )
+
+	( store mutex handle at +2 )
+	OVR2 #0002 ADD2 STA2   ( barrier* )
+
+	( create cond )
+	JSR2 cond-create       ( barrier* cid status )
+	DUP #00 NEQ ,&barrier-init-cond-fail JCN
+	POP                    ( barrier* cid )
+
+	( store cond handle at +4 )
+	OVR2 #0004 ADD2 STA2   ( barrier* )
+
+	POP2                   ( -- )
+	#00
+	JMP2r
+
+&barrier-init-mutex-fail
+	( barrier* mid status  -> return status, drop barrier* + mid )
+	NIP                    ( barrier* status )
+	SWP2 POP2              ( status )
+	JMP2r
+
+&barrier-init-cond-fail
+	( barrier* cid status )
+	NIP                    ( barrier* status )
+	SWP2 POP2              ( status )
+	JMP2r
+
+
+( wait-at-barrier: ( barrier* -- status ) )
 @wait-at-barrier
+	( lock mutex )
+	DUP2 #0002 ADD2 LDA2
+	JSR2 mutex-lock        ( barrier* status )
+	DUP #00 NEQ ,&wait-lock-fail JCN
+	POP                    ( barrier* )
+
+	( decrement count: count := count - 1 )
+	DUP2 LDA               ( barrier* count )
+	#01 SUB                ( barrier* newcount )
+	DUP OVR2 STA           ( barrier* newcount )
+
+	( if newcount == 0 -> last arriver )
+	DUP #00 EQU ,&wait-last JCN
+
+	( not last: drop newcount and wait )
+	POP
+
+	( cond-wait: ( cid mid -- status ) )
+	DUP2 #0002 ADD2 LDA2   ( barrier* mid )
+	OVR2 #0004 ADD2 LDA2   ( barrier* mid cid )
+	SWP2                   ( barrier* cid mid )
+	JSR2 cond-wait         ( barrier* status )
+	DUP #00 NEQ ,&wait-after-wait JCN
+	POP                    ( barrier* )
+	JMP ,&wait-unlock
+
+&wait-last
+	( barrier* newcount )
+	POP
+
+	( reset count := total )
+	DUP2 #0001 ADD2 LDA    ( barrier* total )
+	OVR2 STA               ( barrier* )
+
+	( broadcast )
+	DUP2 #0004 ADD2 LDA2
+	JSR2 cond-broadcast    ( barrier* status )
+	DUP #00 NEQ ,&wait-after-broadcast JCN
+	POP                    ( barrier* )
+	JMP ,&wait-unlock
+
+&wait-unlock
+	DUP2 #0002 ADD2 LDA2
+	JSR2 mutex-unlock      ( barrier* status )
+	SWP2 POP2              ( status )
+	JMP2r
+
+&wait-lock-fail
+	( barrier* status )
+	SWP2 POP2              ( status )
+	JMP2r
+
+&wait-after-wait
+	( barrier* wait-status )
+	( still unlock the mutex, but this simple version returns unlock status )
+	POP
+	JMP ,&wait-unlock
+
+&wait-after-broadcast
+	( barrier* broadcast-status )
+	( still unlock the mutex, but this simple version returns unlock status )
+	POP
+	JMP ,&wait-unlock

@@ -11,6 +11,7 @@
 #include "threads.h"
 #include "../utils/mutex_array_list.h"
 #include "../utils/cond_array_list.h"
+#include "../utils/barrier_array_list.h"
 #include "system.h"
 
 #if LOGGING_ENABLED
@@ -90,6 +91,13 @@ typedef enum {
     CondTimedWait_ClockFail,
 } CondTimedWaitResult;
 
+typedef enum {
+    BarrierInit_OK = 0,
+    BarrierInit_InvalidAttributes,
+    BarrierInit_SystemResources,
+    BarrierInit_PermissionDenied,
+} BarrierInitError;
+
 enum { STATUS_OK = 0, STATUS_ERROR = 1 };
 
 /* CMD meanings
@@ -107,6 +115,9 @@ B - Wait on a condition variable (ARG_0=cond, ARG_1=mutex)
 C - Signal one thread waiting on condition variable in ARG_0
 D - Broadcast all threads waiting on condition variable in ARG_0
 E - Timed wait on a condition variable (ARG_0=cond, ARG_1=mutex, ARG_2=timeout_ms)
+F - Create a barrier (ARG_0=thread count), returns handle in RETURN
+10 - Destroy a barrier given handle in ARG_0
+11 - Wait on a barrier given handle in ARG_0, RETURN=1 if serial thread else 0
 */
 enum {
   CMD_CREATE =        0x01,
@@ -123,6 +134,9 @@ enum {
   CMD_COND_SIGNAL =   0x0C,
   CMD_COND_BROADCAST = 0x0D,
   CMD_COND_TIMEDWAIT = 0x0E,
+  CMD_BARRIER_CREATE =  0x0F,
+  CMD_BARRIER_DESTROY = 0x10,
+  CMD_BARRIER_WAIT =    0x11,
 };
 typedef struct {
   pthread_t thread_handle;
@@ -142,6 +156,9 @@ static bool mutex_table_initialized = false;
 
 static CondTable cond_table = { NULL, 0 };
 static bool cond_table_initialized = false;
+
+static BarrierTable barrier_table = { NULL, 0 };
+static bool barrier_table_initialized = false;
 
 #define MAX_THREAD_COUNT 16
 static ThreadRecord thread_records[MAX_THREAD_COUNT];
@@ -707,6 +724,88 @@ void threads_deo(Uint8 address) {
     } else {
       uxn.dev[THREAD_STATUS] = STATUS_ERROR;
       device_set16(RETURN_LO, (Uint16)CondTimedWait_InvalidArgs);
+    }
+    break;
+  }
+  case CMD_BARRIER_CREATE: {
+    Uint16 count = device_get16(ARG_0_LO);
+    unsigned long h;
+    int rc;
+
+    log_printf("threads_deo: CMD_BARRIER_CREATE count=%d\n", count);
+
+    if (count == 0) {
+      uxn.dev[THREAD_STATUS] = BarrierInit_InvalidAttributes;
+      device_set16(RETURN_LO, 0);
+      break;
+    }
+
+    if (!barrier_table_initialized) {
+      rc = barrier_table_init(&barrier_table, 16);
+      if (rc != 0) {
+        uxn.dev[THREAD_STATUS] = BarrierInit_SystemResources;
+        device_set16(RETURN_LO, 0);
+        break;
+      }
+      barrier_table_initialized = true;
+    }
+
+    h = barrier_table_create_barrier(&barrier_table, (unsigned int)count);
+    if (h > BT_HANDLE_MAX) {
+      uxn.dev[THREAD_STATUS] = BarrierInit_SystemResources;
+      device_set16(RETURN_LO, 0);
+    } else {
+      uxn.dev[THREAD_STATUS] = BarrierInit_OK;
+      device_set16(RETURN_LO, (Uint16)h);
+    }
+    break;
+  }
+  case CMD_BARRIER_DESTROY: {
+    Uint16 handle = device_get16(ARG_0_LO);
+    unsigned long rc;
+
+    log_printf("threads_deo: CMD_BARRIER_DESTROY handle=%d\n", handle);
+
+    if (!barrier_table_initialized) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    rc = barrier_table_destroy_barrier(&barrier_table, (unsigned long)handle);
+    if (rc == 0) {
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+    } else {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+    }
+    break;
+  }
+  case CMD_BARRIER_WAIT: {
+    Uint16 handle = device_get16(ARG_0_LO);
+    pthread_barrier_t *b;
+    int rc;
+
+    log_printf("threads_deo: CMD_BARRIER_WAIT handle=%d\n", handle);
+
+    if (!barrier_table_initialized) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    b = barrier_table_get_barrier(&barrier_table, (unsigned long)handle);
+    if (b == NULL) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    rc = pthread_barrier_wait(b);
+    if (rc == 0) {
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+      device_set16(RETURN_LO, 0);
+    } else if (rc == PTHREAD_BARRIER_SERIAL_THREAD) {
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+      device_set16(RETURN_LO, 1);
+    } else {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
     }
     break;
   }
