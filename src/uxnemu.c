@@ -444,9 +444,12 @@ emu_run(void)
 	/* game loop */
 	for(;;) {
 		Uint64 now = SDL_GetPerformanceCounter();
-		/* .System/halt */
-		if(uxn.dev[0x0f])
+		/* .System/state */
+		if(uxn.dev[0x0f]) {
+			if(uxn.dev[0x0f] & 0x80)
+				return 0; /* success */
 			return system_error("Run", "Ended.");
+		}
 		exec_deadline = now + deadline_interval;
 		if(!handle_events())
 			return 0;
