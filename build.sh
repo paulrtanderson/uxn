@@ -52,7 +52,7 @@ fi
 
 mkdir -p bin
 CC="${CC:-cc}"
-CFLAGS="${CFLAGS:--std=c89 -D_XOPEN_SOURCE=700 -Wall -Wno-unknown-pragmas}"
+CFLAGS="${CFLAGS:--std=c11 -D_XOPEN_SOURCE=700 -Wall -Wno-unknown-pragmas}"
 case "$(uname -s 2>/dev/null)" in
 MSYS_NT*|MINGW*) # MSYS2 on Windows
 	FILE_LDFLAGS="-liberty"

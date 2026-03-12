@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <time.h>
 
 #include "../uxn.h"
@@ -138,11 +139,10 @@ enum {
 };
 typedef struct {
   pthread_t thread_handle;
-  pthread_mutex_t thread_mutex;
+  atomic_int in_use;
   Uint16 arg_0;
   Uint16 arg_1;
   Uint16 result_value;
-  bool is_in_use;
 } ThreadRecord;
 
 /* TODO: fix race condition if two threads try to initialised this*/
@@ -168,11 +168,6 @@ static bool mutex_init_done = false;
 
 static void initialize_mutexes() {
   if (!mutex_init_done) {
-    int i;
-    for (i = 0; i < MAX_THREAD_COUNT; i++) {
-      pthread_mutex_init(&thread_records[i].thread_mutex, NULL);
-    }
-    
     /* Initialize mutex table here - safe because this runs before any threads are created */
     if (!mutex_table_initialized) {
       if (mutex_table_init(&mutex_table, 16) == 0) {
@@ -183,17 +178,13 @@ static void initialize_mutexes() {
     mutex_init_done = true;
 
     /* first record is main thread */
-    thread_records[0].is_in_use = true;
+    atomic_store(&thread_records[0].in_use, 1);
     thread_records[0].thread_handle = pthread_self();
   }
 }
 
 void destroy_mutexes() {
   if (mutex_init_done) {
-    int i;
-    for (i = 0; i < MAX_THREAD_COUNT; i++) {
-      pthread_mutex_destroy(&thread_records[i].thread_mutex);
-    }
     mutex_init_done = false;
   }
 }
@@ -212,17 +203,12 @@ static void device_set16(Uint16 low_address, Uint16 value) {
 static Uint8 find_first_free_thread_num(void) {
   Uint8 i;
   for (i = 0; i < MAX_THREAD_COUNT; i++) {
-    /* Non blocking check for free slot because if something has the mutex it must be in use */
-    if (pthread_mutex_trylock(&thread_records[i].thread_mutex) == 0) {
-      if (!thread_records[i].is_in_use) {
-        thread_records[i].is_in_use = true;
-        pthread_mutex_unlock(&thread_records[i].thread_mutex);
-        return i;
-      }
-      pthread_mutex_unlock(&thread_records[i].thread_mutex);
+    int expected = 0;
+    if (atomic_compare_exchange_strong(&thread_records[i].in_use, &expected, 1)) {
+      return i;
     }
   }
-  return -1;
+  return (Uint8)-1;
 }
 
 /* Thread starts evaluating uxn code here */
@@ -282,7 +268,7 @@ static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr) {
     case EPERM:
       uxn.dev[THREAD_STATUS] = ThreadCreate_PermissionDenied;
     default:
-      thread_records[thread_id].is_in_use = false;
+      atomic_store(&thread_records[thread_id].in_use, 0);
       log_printf("handle_create_command: pthread_create failed with error=%d\n", error);
       return;
   }
@@ -319,7 +305,7 @@ static void handle_join_command(Uint16 thread_num) {
       return;
   }
 
-  record->is_in_use = false;
+  atomic_store(&record->in_use, 0);
 
   device_set16(RETURN_LO, record->result_value);
 
@@ -332,7 +318,7 @@ Uint8 get_current_thread_num(void) {
 
     for (i = 0; i < MAX_THREAD_COUNT; i++) {
       log_printf("get_current_thread_num: checking thread_num=%d\n", i);
-        if (thread_records[i].is_in_use) {
+        if (atomic_load(&thread_records[i].in_use)) {
             if (pthread_equal(thread_records[i].thread_handle, self)) {
               log_printf("get_current_thread_num: found current thread at thread_num=%d\n", i);
                 return i;

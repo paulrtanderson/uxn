@@ -45,7 +45,7 @@ WITH REGARD TO THIS SOFTWARE.
 int
 uxn_eval(Uint16 pc)
 {
-	unsigned int a, b, c, x[2], y[2], z[2], step;
+	unsigned int a, b, c, x[2], y[2], z[2];
 	if(!pc || uxn.dev[0x0f]) return 0;
 	while (1) {
 		switch(uxn.ram[pc++]) {
