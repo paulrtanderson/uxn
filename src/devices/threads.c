@@ -103,51 +103,46 @@ enum { STATUS_OK = 0, STATUS_ERROR = 1 };
 /* CMD meanings
 1 - Create a new thread
 2 - Join a thread
-3 - Detach a thread
-4 - Create a mutex, returns handle in RETURN
-5 - Destroy a mutex given handle in ARG_0
-6 - Lock a mutex given handle in ARG_0
-7 - Unlock a mutex given handle in ARG_0
-8 - Use local storage index
-9 - Create a condition variable, returns handle in RETURN
-A - Destroy a condition variable given handle in ARG_0
-B - Wait on a condition variable (ARG_0=cond, ARG_1=mutex)
-C - Signal one thread waiting on condition variable in ARG_0
-D - Broadcast all threads waiting on condition variable in ARG_0
-E - Timed wait on a condition variable (ARG_0=cond, ARG_1=mutex, ARG_2=timeout_ms)
-F - Create a barrier (ARG_0=thread count), returns handle in RETURN
-10 - Destroy a barrier given handle in ARG_0
-11 - Wait on a barrier given handle in ARG_0, RETURN=1 if serial thread else 0
+3 - Create a mutex, returns handle in RETURN
+4 - Destroy a mutex given handle in ARG_0
+5 - Lock a mutex given handle in ARG_0
+6 - Unlock a mutex given handle in ARG_0
+7 - Use local storage index
+8 - Create a condition variable, returns handle in RETURN
+9 - Destroy a condition variable given handle in ARG_0
+A - Wait on a condition variable (ARG_0=cond, ARG_1=mutex)
+B - Signal one thread waiting on condition variable in ARG_0
+C - Broadcast all threads waiting on condition variable in ARG_0
+D - Timed wait on a condition variable (ARG_0=cond, ARG_1=mutex, ARG_2=timeout_ms)
+E - Create a barrier (ARG_0=thread count), returns handle in RETURN
+F - Destroy a barrier given handle in ARG_0
+10 - Wait on a barrier given handle in ARG_0, RETURN=1 if serial thread else 0
 */
 enum {
   CMD_CREATE =        0x01,
   CMD_JOIN =          0x02,
-  CMD_DETACH =        0x03,
-  CMD_MUTEX_CREATE =  0x04,
-  CMD_MUTEX_DESTROY = 0x05,
-  CMD_MUTEX_LOCK =    0x06,
-  CMD_MUTEX_UNLOCK =  0x07,
-  CMD_USELOCALSTORAGEINDEX = 0x08,
-  CMD_COND_CREATE =   0x09,
-  CMD_COND_DESTROY =  0x0A,
-  CMD_COND_WAIT =     0x0B,
-  CMD_COND_SIGNAL =   0x0C,
-  CMD_COND_BROADCAST = 0x0D,
-  CMD_COND_TIMEDWAIT = 0x0E,
-  CMD_BARRIER_CREATE =  0x0F,
-  CMD_BARRIER_DESTROY = 0x10,
-  CMD_BARRIER_WAIT =    0x11,
+  CMD_MUTEX_CREATE =  0x03,
+  CMD_MUTEX_DESTROY = 0x04,
+  CMD_MUTEX_LOCK =    0x05,
+  CMD_MUTEX_UNLOCK =  0x06,
+  CMD_USELOCALSTORAGEINDEX = 0x07,
+  CMD_COND_CREATE =   0x08,
+  CMD_COND_DESTROY =  0x09,
+  CMD_COND_WAIT =     0x0A,
+  CMD_COND_SIGNAL =   0x0B,
+  CMD_COND_BROADCAST = 0x0C,
+  CMD_COND_TIMEDWAIT = 0x0D,
+  CMD_BARRIER_CREATE =  0x0E,
+  CMD_BARRIER_DESTROY = 0x0F,
+  CMD_BARRIER_WAIT =    0x10,
 };
 typedef struct {
   pthread_t thread_handle;
   pthread_mutex_t thread_mutex;
   Uint16 arg_0;
   Uint16 arg_1;
-  Uint16 arg_2;
   Uint16 result_value;
   bool is_in_use;
-  bool is_detached;
-  bool is_finished;
 } ThreadRecord;
 
 /* TODO: fix race condition if two threads try to initialised this*/
@@ -253,24 +248,13 @@ static void *worker_thread_entry(void *p_worker_thread_args) {
 
   log_printf("worker_thread_entry: result_value=0x%04x\n", result);
 
-  pthread_mutex_lock(&p_record->thread_mutex);
-  p_record->is_finished = true;
-
-  if (p_record->is_detached) {
-      /* We are detached: free the slot for reuse */
-      p_record->is_in_use = false;
-      p_record->is_detached = false;
-      p_record->is_finished = false;
-  }
-
-  pthread_mutex_unlock(&p_record->thread_mutex);
   return NULL;
 }
 
 
 
 /* when a CREATE command is received */
-static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr, Uint8 flags) {
+static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr) {
   Uint8 thread_id = find_first_free_thread_num();
   if (thread_id == (Uint8)-1) {
     log_printf("handle_create_command: no free thread slots\n");
@@ -280,30 +264,13 @@ static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr, Uint8 fl
 
   thread_records[thread_id].arg_0 = entry_address;
   thread_records[thread_id].arg_1 = arg_ptr;
-  thread_records[thread_id].arg_2 = flags;
   thread_records[thread_id].result_value = 0;
-
 
   /* copy ram pointer from TLS to global variable */
   shared_ram_ptr = uxn.ram;
 
-  pthread_attr_t attr;
-  pthread_attr_t *attr_ptr = NULL;
-  thread_records[thread_id].is_detached = false;
-
-  /* only flag is detach for now */
-  if (flags == 1) {
-    attr_ptr = &attr;
-    pthread_attr_init(attr_ptr);
-
-    pthread_attr_setdetachstate(attr_ptr, PTHREAD_CREATE_DETACHED);
-
-    thread_records[thread_id].is_detached = true; 
-  }
-
-  int error = pthread_create(&thread_records[thread_id].thread_handle, attr_ptr,
+  int error = pthread_create(&thread_records[thread_id].thread_handle, NULL,
                worker_thread_entry, (void *)&thread_records[thread_id]);
-  if (attr_ptr) pthread_attr_destroy(attr_ptr);
   switch (error) {
     case 0:
       uxn.dev[THREAD_STATUS] = ThreadCreate_OK;
@@ -353,37 +320,10 @@ static void handle_join_command(Uint16 thread_num) {
   }
 
   record->is_in_use = false;
-  record->is_detached = false;
-  record->is_finished = false;
 
   device_set16(RETURN_LO, record->result_value);
 
   log_printf("handle_join_command: joined with return value=0x%04x\n", record->result_value);
-}
-
-bool detach_thread(int i) {
-    ThreadRecord *record = &thread_records[i];
-    bool result = false;
-
-    pthread_mutex_lock(&record->thread_mutex);
-
-    if (!record->is_in_use)
-        goto unlock;
-
-    record->is_detached = true;
-    pthread_detach(record->thread_handle);
-
-    if (record->is_finished) {
-        record->is_in_use = false;
-        record->is_detached = false;
-        record->is_finished = false;
-    }
-
-    result = true;
-
-unlock:
-    pthread_mutex_unlock(&record->thread_mutex);
-    return result;
 }
 
 Uint8 get_current_thread_num(void) {
@@ -425,23 +365,13 @@ void threads_deo(Uint8 address) {
     log_printf("threads_deo: CMD_CREATE\n");
     Uint16 entry_address = device_get16(ARG_0_LO);
     Uint16 arg_ptr = device_get16(ARG_1_LO);
-    Uint8 flag = uxn.dev[ARG_2_LO];
-    log_printf("with args <entry_address=0x%04x, arg_ptr=0x%04x, flags=0x%02x>\n", entry_address, arg_ptr, flag);
-    handle_create_command(entry_address, arg_ptr, flag);
+    log_printf("with args <entry_address=0x%04x, arg_ptr=0x%04x>\n", entry_address, arg_ptr);
+    handle_create_command(entry_address, arg_ptr);
     break;
   case CMD_JOIN:
     log_printf("threads_deo: CMD_JOIN\n");
     Uint16 target_thread_id = device_get16(ARG_0_LO);
     handle_join_command(target_thread_id);
-    break;
-  case CMD_DETACH:
-    log_printf("threads_deo: CMD_DETACH\n");
-    Uint16 detach_thread_id = device_get16(ARG_0_LO);
-    if (detach_thread(detach_thread_id)) {
-        uxn.dev[THREAD_STATUS] = STATUS_OK;
-    } else {
-        uxn.dev[THREAD_STATUS] = STATUS_ERROR;
-    }
     break;
   case CMD_MUTEX_CREATE: {
     unsigned long h;
