@@ -108,7 +108,7 @@ enum { STATUS_OK = 0, STATUS_ERROR = 1 };
 4 - Destroy a mutex given handle in ARG_0
 5 - Lock a mutex given handle in ARG_0
 6 - Unlock a mutex given handle in ARG_0
-7 - Use local storage index
+7 - Try lock a mutex given handle in ARG_0, RETURN=1 if acquired else 0
 8 - Create a condition variable, returns handle in RETURN
 9 - Destroy a condition variable given handle in ARG_0
 A - Wait on a condition variable (ARG_0=cond, ARG_1=mutex)
@@ -126,7 +126,7 @@ enum {
   CMD_MUTEX_DESTROY = 0x04,
   CMD_MUTEX_LOCK =    0x05,
   CMD_MUTEX_UNLOCK =  0x06,
-  CMD_USELOCALSTORAGEINDEX = 0x07,
+  CMD_MUTEX_TRYLOCK = 0x07,
   CMD_COND_CREATE =   0x08,
   CMD_COND_DESTROY =  0x09,
   CMD_COND_WAIT =     0x0A,
@@ -453,6 +453,36 @@ void threads_deo(Uint8 address) {
       uxn.dev[THREAD_STATUS] = STATUS_OK;
     else
       uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+    break;
+  }
+  case CMD_MUTEX_TRYLOCK: {
+    Uint16 handle = device_get16(ARG_0_LO);
+    pthread_mutex_t *m;
+    int rc;
+
+    log_printf("threads_deo: CMD_MUTEX_TRYLOCK\n");
+
+    if (!mutex_table_initialized) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    m = mutex_table_get_mutex(&mutex_table, (unsigned long)handle);
+    if (m == NULL) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      break;
+    }
+
+    rc = pthread_mutex_trylock(m);
+    if (rc == 0) {
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+      device_set16(RETURN_LO, 1); /* acquired */
+    } else if (rc == EBUSY) {
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+      device_set16(RETURN_LO, 0); /* not acquired */
+    } else {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+    }
     break;
   }
   case CMD_COND_CREATE: {
