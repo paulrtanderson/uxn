@@ -457,7 +457,7 @@ emu_run(void)
 			now = SDL_GetPerformanceCounter();
 			next_refresh = now + frame_interval;
 			uxn_eval(uxn_screen.vector);
-			if(uxn_screen.x2 && uxn_screen.y2 && screen_changed())
+			if(screen_changed())
 				screen_redraw(), emu_redraw();
 		}
 		if(uxn_screen.vector) {
