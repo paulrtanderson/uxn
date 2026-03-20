@@ -102,6 +102,7 @@ typedef enum {
 enum { STATUS_OK = 0, STATUS_ERROR = 1 };
 
 /* CMD meanings
+0 - Return the current thread index in RETURN
 1 - Create a new thread
 2 - Join a thread
 3 - Create a mutex, returns handle in RETURN
@@ -120,6 +121,7 @@ F - Destroy a barrier given handle in ARG_0
 10 - Wait on a barrier given handle in ARG_0, RETURN=1 if serial thread else 0
 */
 enum {
+  CMD_SELF =          0x00,
   CMD_CREATE =        0x01,
   CMD_JOIN =          0x02,
   CMD_MUTEX_CREATE =  0x03,
@@ -347,6 +349,20 @@ void threads_deo(Uint8 address) {
   }
 
   switch (uxn.dev[THREAD_CMD]) {
+  case CMD_SELF: {
+    Uint8 thread_num = get_current_thread_num();
+
+    log_printf("threads_deo: CMD_SELF\n");
+
+    if (thread_num == (Uint8)-1) {
+      uxn.dev[THREAD_STATUS] = STATUS_ERROR;
+      device_set16(RETURN_LO, 0);
+    } else {
+      uxn.dev[THREAD_STATUS] = STATUS_OK;
+      device_set16(RETURN_LO, (Uint16)thread_num);
+    }
+    break;
+  }
   case CMD_CREATE:
     log_printf("threads_deo: CMD_CREATE\n");
     Uint16 entry_address = device_get16(ARG_0_LO);
