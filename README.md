@@ -37,12 +37,33 @@ Ports
 
 #### The Device does not mutate or interact with the Uxn stack directly; all stack interaction is done by the Uxntal wrappers.
 ---
+Command: SELF (0x00)
+Device API
+- Writes:
+  - cmd (D0): 0x00
+- Reads:
+  - r0 (D8–D9): current THREAD_ID (16-bit) on success
+  - errno (D1): 0=success, 1=error
+
+Uxntal wrapper
+```tal
+@thread-self  ( -- tid|err status )
+    #00 .Threads/cmd DEO
+    .Threads/r0 DEI2
+    .Threads/errno DEI
+    JMP2r
+```
+- Wrapper stack interaction:
+  - Pops: 0 bytes
+  - Pushes: 3 bytes (tid-or-err 2, status 1)
+
+---
+
 Command: CREATE (0x01)
 Device API
 - Writes:
   - a0 (D2–D3): ENTRY_PTR (16-bit)
   - a1 (D4–D5): ARG_PTR (16-bit, 0 if none)
-  - a2 (D6–D7): FLAGS (16-bit; 0=joinable, 1=detached)
   - cmd (D0): 0x01
 - Reads:
   - r0 (D8–D9): THREAD_ID (16-bit) on success
@@ -50,8 +71,7 @@ Device API
 
 Uxntal wrapper
 ```tal
-@thread-create  ( entry arg flags -- tid|err status )
-    .Threads/a2 DEO2
+@thread-create  ( entry arg -- tid|err status )
     .Threads/a1 DEO2
     .Threads/a0 DEO2
     #01 .Threads/cmd DEO
@@ -60,7 +80,7 @@ Uxntal wrapper
     JMP2r
 ```
 - Wrapper stack interaction:
-  - Pops: 6 bytes (entry 2, arg 2, flags 2)
+  - Pops: 4 bytes (entry 2, arg 2)
   - Pushes: 3 bytes (tid-or-err 2, status 1)
 - errno codes (ThreadCreateError):
   - `0` — OK
@@ -101,36 +121,11 @@ Uxntal wrapper
 
 ---
 
-Command: DETACH (0x03)
-Device API
-- Writes:
-  - a0 (D2–D3): THREAD_ID (16-bit)
-  - cmd (D0): 0x03
-- Reads:
-  - errno (D1): 0=success, 1=error
-  - (r0 unused)
-
-Uxntal wrapper
-```tal
-@thread-detach  ( tid -- status )
-    .Threads/a0 DEO2
-    #03 .Threads/cmd DEO
-    .Threads/errno DEI
-    JMP2r
-```
-- Wrapper stack interaction:
-  - Pops: 2 bytes (tid)
-  - Pushes: 1 byte (status)
-- errno: `0`=success, `1`=error
-- Note: Detaches the thread so it cannot be joined. Its resources are freed automatically when it finishes.
-
----
-
-Command: MUTEX_CREATE (0x04)
+Command: MUTEX_CREATE (0x03)
 Device API
 - Writes:
   - a0 (D2–D3): ATTR_PTR (16-bit, 0 if none)
-  - cmd (D0): 0x04
+  - cmd (D0): 0x03
 - Reads:
   - r0 (D8–D9): MUTEX_ID (16-bit) on success
   - errno (D1): MutexInitError code
@@ -139,7 +134,7 @@ Uxntal wrapper
 ```tal
 @mutex-create  ( -- mid|err status )
     #0000 .Threads/a0 DEO2
-    #04 .Threads/cmd DEO
+    #03 .Threads/cmd DEO
     .Threads/r0 DEI2
     .Threads/errno DEI
     JMP2r
@@ -155,7 +150,31 @@ Uxntal wrapper
 
 ---
 
-Command: MUTEX_DESTROY (0x05)
+Command: MUTEX_DESTROY (0x04)
+Device API
+- Writes:
+  - a0 (D2–D3): MUTEX_ID (16-bit)
+  - cmd (D0): 0x04
+- Reads:
+  - errno (D1): 0=success, 1=error
+  - (r0 unused)
+
+Uxntal wrapper
+```tal
+@mutex-destroy  ( mid -- status )
+    .Threads/a0 DEO2
+    #04 .Threads/cmd DEO
+    .Threads/errno DEI
+    JMP2r
+```
+- Wrapper stack interaction:
+  - Pops: 2 bytes (mid)
+  - Pushes: 1 byte (status)
+- errno: `0`=success, `1`=error
+
+---
+
+Command: MUTEX_LOCK (0x05)
 Device API
 - Writes:
   - a0 (D2–D3): MUTEX_ID (16-bit)
@@ -166,7 +185,7 @@ Device API
 
 Uxntal wrapper
 ```tal
-@mutex-destroy  ( mid -- status )
+@mutex-lock  ( mid -- status )
     .Threads/a0 DEO2
     #05 .Threads/cmd DEO
     .Threads/errno DEI
@@ -179,7 +198,7 @@ Uxntal wrapper
 
 ---
 
-Command: MUTEX_LOCK (0x06)
+Command: MUTEX_UNLOCK (0x06)
 Device API
 - Writes:
   - a0 (D2–D3): MUTEX_ID (16-bit)
@@ -190,7 +209,7 @@ Device API
 
 Uxntal wrapper
 ```tal
-@mutex-lock  ( mid -- status )
+@mutex-unlock  ( mid -- status )
     .Threads/a0 DEO2
     #06 .Threads/cmd DEO
     .Threads/errno DEI
@@ -203,18 +222,18 @@ Uxntal wrapper
 
 ---
 
-Command: MUTEX_UNLOCK (0x07)
+Command: MUTEX_TRYLOCK (0x07)
 Device API
 - Writes:
   - a0 (D2–D3): MUTEX_ID (16-bit)
   - cmd (D0): 0x07
 - Reads:
+  - r0 (D8–D9): 1 if acquired, 0 if not acquired
   - errno (D1): 0=success, 1=error
-  - (r0 unused)
 
 Uxntal wrapper
 ```tal
-@mutex-unlock  ( mid -- status )
+@mutex-trylock  ( mid -- status )
     .Threads/a0 DEO2
     #07 .Threads/cmd DEO
     .Threads/errno DEI
@@ -227,10 +246,10 @@ Uxntal wrapper
 
 ---
 
-Command: COND_CREATE (0x09)
+Command: COND_CREATE (0x08)
 Device API
 - Writes:
-  - cmd (D0): 0x09
+  - cmd (D0): 0x08
 - Reads:
   - r0 (D8–D9): COND_ID (16-bit) on success
   - errno (D1): CondInitError code
@@ -238,7 +257,7 @@ Device API
 Uxntal wrapper
 ```tal
 @cond-create  ( -- cid|err status )
-    #09 .Threads/cmd DEO
+    #08 .Threads/cmd DEO
     .Threads/r0 DEI2
     .Threads/errno DEI
     JMP2r
@@ -254,11 +273,11 @@ Uxntal wrapper
 
 ---
 
-Command: COND_DESTROY (0x0A)
+Command: COND_DESTROY (0x09)
 Device API
 - Writes:
   - a0 (D2–D3): COND_ID (16-bit)
-  - cmd (D0): 0x0A
+  - cmd (D0): 0x09
 - Reads:
   - errno (D1): 0=success, 1=error
   - (r0 unused)
@@ -267,7 +286,7 @@ Uxntal wrapper
 ```tal
 @cond-destroy  ( cid -- status )
     .Threads/a0 DEO2
-    #0a .Threads/cmd DEO
+    #09 .Threads/cmd DEO
     .Threads/errno DEI
     JMP2r
 ```
@@ -278,12 +297,12 @@ Uxntal wrapper
 
 ---
 
-Command: COND_WAIT (0x0B)
+Command: COND_WAIT (0x0A)
 Device API
 - Writes:
   - a0 (D2–D3): COND_ID (16-bit)
   - a1 (D4–D5): MUTEX_ID (16-bit) — mutex must be locked by caller
-  - cmd (D0): 0x0B
+  - cmd (D0): 0x0A
 - Reads:
   - errno (D1): 0=success, 1=error
   - (r0 unused)
@@ -293,7 +312,7 @@ Uxntal wrapper
 @cond-wait  ( cid mid -- status )
     .Threads/a1 DEO2
     .Threads/a0 DEO2
-    #0b .Threads/cmd DEO
+    #0a .Threads/cmd DEO
     .Threads/errno DEI
     JMP2r
 ```
@@ -305,11 +324,11 @@ Uxntal wrapper
 
 ---
 
-Command: COND_SIGNAL (0x0C)
+Command: COND_SIGNAL (0x0B)
 Device API
 - Writes:
   - a0 (D2–D3): COND_ID (16-bit)
-  - cmd (D0): 0x0C
+  - cmd (D0): 0x0B
 - Reads:
   - errno (D1): 0=success, 1=error
   - (r0 unused)
@@ -318,7 +337,7 @@ Uxntal wrapper
 ```tal
 @cond-signal  ( cid -- status )
     .Threads/a0 DEO2
-    #0c .Threads/cmd DEO
+    #0b .Threads/cmd DEO
     .Threads/errno DEI
     JMP2r
 ```
@@ -330,11 +349,11 @@ Uxntal wrapper
 
 ---
 
-Command: COND_BROADCAST (0x0D)
+Command: COND_BROADCAST (0x0C)
 Device API
 - Writes:
   - a0 (D2–D3): COND_ID (16-bit)
-  - cmd (D0): 0x0D
+  - cmd (D0): 0x0C
 - Reads:
   - errno (D1): 0=success, 1=error
   - (r0 unused)
@@ -343,7 +362,7 @@ Uxntal wrapper
 ```tal
 @cond-broadcast  ( cid -- status )
     .Threads/a0 DEO2
-    #0d .Threads/cmd DEO
+    #0c .Threads/cmd DEO
     .Threads/errno DEI
     JMP2r
 ```
@@ -355,13 +374,13 @@ Uxntal wrapper
 
 ---
 
-Command: COND_TIMEDWAIT (0x0E)
+Command: COND_TIMEDWAIT (0x0D)
 Device API
 - Writes:
   - a0 (D2–D3): COND_ID (16-bit)
   - a1 (D4–D5): MUTEX_ID (16-bit) — mutex must be locked by caller
   - a2 (D6–D7): TIMEOUT_MS (16-bit) — timeout in milliseconds (0–65535)
-  - cmd (D0): 0x0E
+  - cmd (D0): 0x0D
 - Reads:
   - r0 (D8–D9): CondTimedWaitResult code (0=signalled, 1=timed out, 2=invalid args, 3=clock failure)
   - errno (D1): 0=success (for both signal and timeout), 1=error
@@ -372,7 +391,7 @@ Uxntal wrapper
     .Threads/a2 DEO2
     .Threads/a1 DEO2
     .Threads/a0 DEO2
-    #0e .Threads/cmd DEO
+    #0d .Threads/cmd DEO
     .Threads/r0 DEI2
     .Threads/errno DEI
     JMP2r
@@ -390,11 +409,11 @@ Uxntal wrapper
 
 ---
 
-Command: BARRIER_CREATE (0x0F)
+Command: BARRIER_CREATE (0x0E)
 Device API
 - Writes:
   - a0 (D2–D3): COUNT (16-bit) — number of threads that must call barrier-wait before any are released; must be >0
-  - cmd (D0): 0x0F
+  - cmd (D0): 0x0E
 - Reads:
   - r0 (D8–D9): BARRIER_ID (16-bit) on success
   - errno (D1): BarrierInitError code
@@ -403,7 +422,7 @@ Uxntal wrapper
 ```tal
 @barrier-create  ( count -- bid|err status )
     .Threads/a0 DEO2
-    #0f .Threads/cmd DEO
+    #0e .Threads/cmd DEO
     .Threads/r0 DEI2
     .Threads/errno DEI
     JMP2r
@@ -419,11 +438,11 @@ Uxntal wrapper
 
 ---
 
-Command: BARRIER_DESTROY (0x10)
+Command: BARRIER_DESTROY (0x0F)
 Device API
 - Writes:
   - a0 (D2–D3): BARRIER_ID (16-bit)
-  - cmd (D0): 0x10
+  - cmd (D0): 0x0F
 - Reads:
   - errno (D1): 0=success, 1=error
   - (r0 unused)
@@ -432,7 +451,7 @@ Uxntal wrapper
 ```tal
 @barrier-destroy  ( bid -- status )
     .Threads/a0 DEO2
-    #10 .Threads/cmd DEO
+    #0f .Threads/cmd DEO
     .Threads/errno DEI
     JMP2r
 ```
@@ -443,11 +462,11 @@ Uxntal wrapper
 
 ---
 
-Command: BARRIER_WAIT (0x11)
+Command: BARRIER_WAIT (0x10)
 Device API
 - Writes:
   - a0 (D2–D3): BARRIER_ID (16-bit)
-  - cmd (D0): 0x11
+  - cmd (D0): 0x10
 - Reads:
   - r0 (D8–D9): 1 if this thread is the "serial thread" (exactly one per barrier release), 0 otherwise
   - errno (D1): 0=success, 1=error
@@ -456,7 +475,7 @@ Uxntal wrapper
 ```tal
 @barrier-wait  ( bid -- serial? status )
     .Threads/a0 DEO2
-    #11 .Threads/cmd DEO
+    #10 .Threads/cmd DEO
     .Threads/r0 DEI2
     .Threads/errno DEI
     JMP2r
@@ -477,23 +496,23 @@ Error handling
 ---
 
 Currently implemented commands:
+- `CMD_SELF (0x00)` — Return current thread ID in r0
 - `CMD_CREATE (0x01)` — Spawn a new thread executing at the address in a0
 - `CMD_JOIN (0x02)` — Wait for a thread specified by a0 to finish
-- `CMD_DETACH (0x03)` — Detach a thread specified by a0
-- `CMD_MUTEX_CREATE (0x04)` — Create a new mutex, returns handle in r0
-- `CMD_MUTEX_DESTROY (0x05)` — Destroy a mutex given handle in a0
-- `CMD_MUTEX_LOCK (0x06)` — Lock a mutex given handle in a0
-- `CMD_MUTEX_UNLOCK (0x07)` — Unlock a mutex given handle in a0
-- `CMD_USELOCALSTORAGEINDEX (0x08)` — Use local storage index
-- `CMD_COND_CREATE (0x09)` — Create a condition variable, returns handle in r0
-- `CMD_COND_DESTROY (0x0A)` — Destroy a condition variable given handle in a0
-- `CMD_COND_WAIT (0x0B)` — Wait on a condition variable (a0=cond, a1=mutex)
-- `CMD_COND_SIGNAL (0x0C)` — Signal one thread waiting on condition variable in a0
-- `CMD_COND_BROADCAST (0x0D)` — Signal all threads waiting on condition variable in a0
-- `CMD_COND_TIMEDWAIT (0x0E)` — Timed wait on a condition variable (a0=cond, a1=mutex, a2=timeout_ms)
-- `CMD_BARRIER_CREATE (0x0F)` — Create a barrier for a0 threads, returns handle in r0
-- `CMD_BARRIER_DESTROY (0x10)` — Destroy a barrier given handle in a0
-- `CMD_BARRIER_WAIT (0x11)` — Wait on a barrier given handle in a0, r0=1 if serial thread else 0
+- `CMD_MUTEX_CREATE (0x03)` — Create a new mutex, returns handle in r0
+- `CMD_MUTEX_DESTROY (0x04)` — Destroy a mutex given handle in a0
+- `CMD_MUTEX_LOCK (0x05)` — Lock a mutex given handle in a0
+- `CMD_MUTEX_UNLOCK (0x06)` — Unlock a mutex given handle in a0
+- `CMD_MUTEX_TRYLOCK (0x07)` — Try to lock a mutex given handle in a0, r0=1 if acquired else 0
+- `CMD_COND_CREATE (0x08)` — Create a condition variable, returns handle in r0
+- `CMD_COND_DESTROY (0x09)` — Destroy a condition variable given handle in a0
+- `CMD_COND_WAIT (0x0A)` — Wait on a condition variable (a0=cond, a1=mutex)
+- `CMD_COND_SIGNAL (0x0B)` — Signal one thread waiting on condition variable in a0
+- `CMD_COND_BROADCAST (0x0C)` — Signal all threads waiting on condition variable in a0
+- `CMD_COND_TIMEDWAIT (0x0D)` — Timed wait on a condition variable (a0=cond, a1=mutex, a2=timeout_ms)
+- `CMD_BARRIER_CREATE (0x0E)` — Create a barrier for a0 threads, returns handle in r0
+- `CMD_BARRIER_DESTROY (0x0F)` — Destroy a barrier given handle in a0
+- `CMD_BARRIER_WAIT (0x10)` — Wait on a barrier given handle in a0, r0=1 if serial thread else 0
 
 Below is the readme of the canonical uxn implementation, the build instructions remain the same for this fork.
 
