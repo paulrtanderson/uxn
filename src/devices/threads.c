@@ -265,14 +265,21 @@ static void handle_create_command(Uint16 entry_address, Uint16 arg_ptr) {
       break;
     case EAGAIN:
       uxn.dev[THREAD_STATUS] = ThreadCreate_SystemResources;
+      break;
     case EINVAL:
       uxn.dev[THREAD_STATUS] = ThreadCreate_InvalidAttributes;
+      break;
     case EPERM:
       uxn.dev[THREAD_STATUS] = ThreadCreate_PermissionDenied;
+      break;
     default:
-      atomic_store(&thread_records[thread_id].in_use, 0);
-      log_printf("handle_create_command: pthread_create failed with error=%d\n", error);
-      return;
+      break;
+  }
+
+  if (error != 0) {
+    atomic_store(&thread_records[thread_id].in_use, 0);
+    log_printf("handle_create_command: pthread_create failed with error=%d\n", error);
+    return;
   }
 
   log_printf("handle_create_command: created thread_id=%d\n", thread_id);
